@@ -5,7 +5,7 @@ from datetime import datetime
 
 from omastore.models import Item, Tab
 
-STATUS_CYCLE = ("all", "installed", "available", "extra", "stock", "current")
+STATUS_CYCLE = ("all", "installed", "available", "extra", "stock", "current", "outdated")
 SOURCE_CYCLE = ("all", "community", "builtin")
 SORT_CYCLE = ("stars", "name", "recent")
 PREFIXES = {
@@ -134,6 +134,8 @@ def matches_filters(item: Item, query: Query) -> bool:
         return False
     if query.status == "current" and not item.current:
         return False
+    if query.status == "outdated" and not getattr(item, "outdated", False):
+        return False
     if query.source not in {"", "all"} and _source_of(item) != query.source:
         return False
     if query.hue not in {"", "all"} and query.hue not in item.hue.lower():
@@ -168,7 +170,10 @@ def _stamp(value: str) -> float:
         return 0.0
 
 
-def sort_key(item: Item, sort: str) -> tuple:
+def sort_key(item: Item, sort: str, tab: Tab) -> tuple:
+    if tab == "plugins":
+        group = 0 if item.installed else 1
+        return (group, item.name.lower(), item.id.lower())
     community = not item.first_party and item.source_type != "builtin"
     base = (
         0 if item.current else 1,
@@ -186,4 +191,4 @@ def sort_key(item: Item, sort: str) -> tuple:
 def apply_query(items: list[Item], query: Query, tab: Tab) -> list[Item]:
     scoped = for_tab(items, tab)
     matched = [item for item in scoped if matches_filters(item, query)]
-    return sorted(matched, key=lambda item: sort_key(item, query.sort))
+    return sorted(matched, key=lambda item: sort_key(item, query.sort, tab))

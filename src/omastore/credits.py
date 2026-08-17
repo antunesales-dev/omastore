@@ -11,35 +11,43 @@ PLUGIN_STORE_REPO = "https://github.com/HANCORE-linux/omarchy-plugin-marketplace
 PLUGIN_STORE_URL = "https://omarchyplugins.com"
 
 STATUS_CREDIT = (
-    f"catalogs: {THEME_STORE_NAME} ({THEME_STORE_AUTHOR})  ·  "
-    f"{PLUGIN_STORE_NAME} ({PLUGIN_STORE_AUTHOR})  ·  ? credits"
+    f"not a competing store  ·  catalogs by {THEME_STORE_AUTHOR} ({THEME_STORE_NAME}) "
+    f"and {PLUGIN_STORE_AUTHOR} ({PLUGIN_STORE_NAME})  ·  ? more"
 )
 
-ABOUT = f"""# Credits
+ABOUT = f"""# This is not a competing store
 
-omastore does not host themes or plugins. It is a terminal client
-that reads public community catalogs, then calls the official
-`omarchy` commands to install or manage what you pick.
+omastore does not replace {THEME_STORE_NAME} or {PLUGIN_STORE_NAME}.
+Those sites are the catalogs. Their authors built the listings,
+the submission flow, and the community around them.
 
-## Theme catalog
+omastore is only another way to *look at the same catalogs*
+from a terminal, then run the official `omarchy` install
+commands those sites already document.
 
-**{THEME_STORE_NAME}** by **{THEME_STORE_AUTHOR}**
+If you want the full gallery, previews, and publishing tools,
+use their websites. This app is a convenience client.
+
+## Theme catalog — thank you, {THEME_STORE_AUTHOR}
+
+**{THEME_STORE_NAME}**
 {THEME_STORE_URL}
 {THEME_STORE_REPO}
 
-Public theme listings, palettes, and README text come from that
-project's `themes-data.json`. MIT licensed marketplace code.
-Themes themselves remain the work of their authors.
+Listings, palettes, and README text are read live from that
+project's public `themes-data.json`. Marketplace code is MIT.
+Each theme still belongs to its author.
 
-## Plugin catalog
+## Plugin catalog — thank you, {PLUGIN_STORE_AUTHOR}
 
-**{PLUGIN_STORE_NAME}** by **{PLUGIN_STORE_AUTHOR}**
+**{PLUGIN_STORE_NAME}**
 {PLUGIN_STORE_URL}
 {PLUGIN_STORE_REPO}
 
-Public plugin listings come from that project's `site/catalog.json`.
-MIT licensed marketplace code. See their NOTICE: plugin code,
-names, logos, and previews stay with their owners.
+Listings are read live from that project's public
+`site/catalog.json`. Marketplace code is MIT. Their NOTICE
+still applies: plugin code, names, logos, and previews stay
+with their owners.
 
 The plugin marketplace credits [bjarneo](https://github.com/bjarneo)
 for interface inspiration and limehawk's theme site for its
@@ -48,13 +56,12 @@ submission workflow.
 ## Authors
 
 Every theme and plugin belongs to the person who published it.
-omastore shows their name and GitHub repo on the detail pane.
-Installing clones *their* repository.
+Installing clones *their* GitHub repository with official Omarchy.
 
 ## Omarchy
 
 Omarchy is by DHH / 37signals / omacom. omastore is an independent
-community client and is not affiliated with, sponsored by, or
+community client. It is not affiliated with, sponsored by, or
 endorsed by Omarchy, 37signals, {THEME_STORE_NAME}, or
 {PLUGIN_STORE_NAME}.
 """

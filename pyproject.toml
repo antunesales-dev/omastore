@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "omastore"
 version = "0.1.0"
-description = "The Omarchy store in your terminal — search, preview, read, and install themes and plugins."
+description = "A terminal client for the community Omarchy theme and plugin catalogs — not a competing store."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"
