@@ -10,6 +10,8 @@ PLUGIN_STORE_AUTHOR = "HANCORE"
 PLUGIN_STORE_REPO = "https://github.com/HANCORE-linux/omarchy-plugin-marketplace"
 PLUGIN_STORE_URL = "https://omarchyplugins.com"
 
+OMASTORE_REPO = "https://github.com/antunesales-dev/omastore"
+
 STATUS_CREDIT = (
     f"not a competing store  ·  catalogs by {THEME_STORE_AUTHOR} ({THEME_STORE_NAME}) "
     f"and {PLUGIN_STORE_AUTHOR} ({PLUGIN_STORE_NAME})  ·  ? more"
@@ -27,6 +29,14 @@ commands those sites already document.
 
 If you want the full gallery, previews, and publishing tools,
 use their websites. This app is a convenience client.
+
+## This client
+
+**omastore**
+{OMASTORE_REPO}
+
+Source, issues, and PRs for the terminal client live there.
+It does not host themes or plugins.
 
 ## Theme catalog — thank you, {THEME_STORE_AUTHOR}
 
