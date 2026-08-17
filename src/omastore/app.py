@@ -10,6 +10,7 @@ from textual.events import Click
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Markdown, OptionList, Static
 from textual.widgets.option_list import Option
+from rich.cells import set_cell_size
 from rich.text import Text
 
 from omastore.actions import (
@@ -54,7 +55,7 @@ def sort_items(items: list[Item], tab: Tab, query: Query | None = None) -> list[
     return apply_query(items, query or Query(), tab)
 
 
-def list_prompt(item: Item) -> Text:
+def list_prompt(item: Item, width: int = 40) -> Text:
     text = Text()
     mark = "●" if item.current or (item.kind == "plugin" and item.enabled) else "○"
     style = "green" if mark == "●" else "dim"
@@ -63,15 +64,16 @@ def list_prompt(item: Item) -> Text:
     if badge == "verified":
         text.append("✓ ", style="green")
     elif badge == "unverified":
-        text.append("− ", style="yellow")
+        text.append("- ", style="yellow")
     else:
         text.append("  ")
-    text.append(item.name)
-    if item.stars:
-        text.append(f"  ★{item.stars}", style="dim")
-    status = item.status_label
-    if status:
-        text.append(f"  {status}", style="dim italic")
+    star = f"*{item.stars}" if item.stars is not None and item.stars > 0 else ""
+    star_width = 6
+    name_width = max(8, width - 4 - (star_width + 1 if star else 0))
+    text.append(set_cell_size(item.name, name_width))
+    if star:
+        text.append(" ")
+        text.append(f"{star:>{star_width}}", style="dim")
     return text
 
 
@@ -372,8 +374,14 @@ class OmaStoreApp(App[None]):
     def _rebuild_list(self) -> None:
         previous = self.selected.key if self.selected else ""
         self.shown = apply_query(self.items, self._active_query(), self.tab)
-        options = [Option(list_prompt(item), id=item.key.replace(":", "__")) for item in self.shown]
         listing = self.query_one("#list", OptionList)
+        row_width = listing.size.width or 40
+        if row_width > 4:
+            row_width -= 3
+        options = [
+            Option(list_prompt(item, row_width), id=item.key.replace(":", "__"))
+            for item in self.shown
+        ]
         listing.clear_options()
         if options:
             listing.add_options(options)

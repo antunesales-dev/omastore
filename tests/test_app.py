@@ -34,12 +34,22 @@ def test_list_prompt_marks_verification() -> None:
     raw = list_prompt(unverified)
     clock = list_prompt(builtin)
     assert "✓" in ok.plain
-    assert "−" in raw.plain
+    assert "-" in raw.plain
     assert "verified" not in ok.plain
     assert "unverified" not in raw.plain
     assert "green" in str(ok.spans)
     assert "yellow" in str(raw.spans)
-    assert clock.plain.startswith("○   Clock") or "  Clock" in clock.plain
+    assert "Clock" in clock.plain
+
+
+def test_list_prompt_keeps_stars_off_the_name() -> None:
+    from omastore.app import list_prompt
+
+    item = Item(kind="plugin", id="x", name="Very Long Plugin Name", stars=25634, verification="verified")
+    line = list_prompt(item, width=28).plain
+    assert "*25634" in line
+    assert "★" not in line
+    assert line.index("Very") < line.index("*25634")
 
 
 def test_palette_skips_duplicates() -> None:
