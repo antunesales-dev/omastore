@@ -27,8 +27,9 @@ It is meant to stay simple.
 
 1. Open `omastore`.
 2. Type `/` and search, or press `1` / `2` / `3` for themes, plugins, or what you already have.
-3. Read the name, author, palette or README on the right.
-4. Press `enter` (or `i`) to install. omastore asks first, then runs the official `omarchy` command.
+3. Filter with `f` (installed / available / extra / stock), `v` (community / built-in), and `s` (stars / name / recent). You can also type prefixes in the search box: `hue:blue`, `tag:bar`, `is:available`, `src:community`.
+4. Read the name, author, palette or README on the right.
+5. Press `enter` (or `i`) to install. omastore asks first, then runs the official `omarchy` command.
 
 You do not browse a new store. You browse **their** catalogs, then Omarchy does the install.
 
@@ -73,6 +74,9 @@ omastore plugins                  # TUI on the plugins tab
 omastore tui --tab plugins
 omastore search lumon
 omastore search overview --kind plugin
+omastore search hue:blue is:available --sort stars
+omastore search --category widgets --tag bar --available
+omastore list --installed --source community
 omastore info theme:lumon --readme
 omastore install theme:lumon
 omastore apply lumon
@@ -87,8 +91,11 @@ omastore about
 
 | Key | Action |
 | --- | --- |
-| `/` | search |
+| `/` | search (also `hue:blue`, `tag:bar`, `is:available`) |
 | `1` `2` `3` | themes / plugins / installed |
+| `f` | cycle status filter |
+| `v` | cycle community / built-in |
+| `s` | cycle sort |
 | `enter` | install, apply, or enable |
 | `i` | install |
 | `a` | apply theme |
@@ -120,6 +127,8 @@ omarchy plugin add <url> --enable --yes
 Review the repository before you confirm.
 
 ## Develop
+
+PRs only — `main` does not take direct pushes. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 .venv/bin/pip install -e '.[dev]'

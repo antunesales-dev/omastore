@@ -1,0 +1,43 @@
+from omastore.filters import Query, apply_query, cycle_status, matches_filters, parse_search
+from omastore.models import Item
+
+
+def _theme(**kwargs) -> Item:
+    data = {"kind": "theme", "id": "lumon", "name": "Lumon", "hue": "blue"}
+    data.update(kwargs)
+    return Item(**data)
+
+
+def test_parse_search_prefixes() -> None:
+    query = parse_search("severance hue:blue is:available src:community sort:name")
+    assert query.text == "severance"
+    assert query.hue == "blue"
+    assert query.status == "available"
+    assert query.source == "community"
+    assert query.sort == "name"
+
+
+def test_status_and_hue_filters() -> None:
+    installed = _theme(id="tokyo-night", name="Tokyo Night", installed=True, builtin=True, hue="blue")
+    available = _theme(id="void", name="Void", hue="red", install_url="https://github.com/x/void", install_available=True)
+    assert matches_filters(installed, Query(status="installed"))
+    assert not matches_filters(available, Query(status="installed"))
+    assert matches_filters(available, Query(status="available", hue="red"))
+    assert not matches_filters(available, Query(hue="blue"))
+
+
+def test_apply_query_sorts_and_scopes() -> None:
+    items = [
+        _theme(id="a", name="Aether", stars=1, hue="green"),
+        _theme(id="b", name="Blue", stars=9, hue="blue"),
+        Item(kind="plugin", id="clock", name="Clock", first_party=True),
+    ]
+    shown = apply_query(items, Query(hue="blue", sort="stars"), "themes")
+    assert [item.id for item in shown] == ["b"]
+    named = apply_query(items, Query(sort="name"), "themes")
+    assert [item.name for item in named] == ["Aether", "Blue"]
+
+
+def test_cycle_status() -> None:
+    query = cycle_status(Query())
+    assert query.status == "installed"

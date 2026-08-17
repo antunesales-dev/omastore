@@ -52,6 +52,12 @@ Footer {
     background: #1f1f1f;
 }
 
+#filters {
+    height: 1;
+    color: #888888;
+    padding: 0 1 0 1;
+}
+
 #body {
     height: 1fr;
 }

@@ -7,6 +7,7 @@ from typing import Sequence
 from omastore import __version__
 from omastore.actions import apply_theme, disable_plugin, enable_plugin, install, remove, update
 from omastore.catalog import load_store
+from omastore.filters import Query, apply_query, parse_search
 from omastore.models import Item, Tab
 
 
@@ -54,13 +55,50 @@ def _print_item(item: Item, *, verbose: bool = False) -> None:
             print(item.readme)
 
 
+def _query_from_args(args: argparse.Namespace, text: str = "") -> Query:
+    query = parse_search(text)
+    if getattr(args, "kind", None):
+        query = Query(**{**query.__dict__, "kind": args.kind})
+    if getattr(args, "installed", False):
+        query = query.with_status("installed")
+    if getattr(args, "available", False):
+        query = query.with_status("available")
+    if getattr(args, "hue", None):
+        query = Query(**{**query.__dict__, "hue": args.hue.lower()})
+    if getattr(args, "category", None):
+        query = Query(**{**query.__dict__, "category": args.category.lower()})
+    if getattr(args, "tag", None):
+        query = Query(**{**query.__dict__, "tag": args.tag.lower()})
+    if getattr(args, "source", None):
+        query = query.with_source(args.source)
+    if getattr(args, "sort", None):
+        query = query.with_sort(args.sort)
+    if getattr(args, "verified", False):
+        query = Query(**{**query.__dict__, "verified": "yes"})
+    return query
+
+
+def _add_filter_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--kind", choices=("theme", "plugin"))
+    parser.add_argument("--installed", action="store_true")
+    parser.add_argument("--available", action="store_true", help="not installed and installable")
+    parser.add_argument("--hue", help="theme hue, e.g. blue")
+    parser.add_argument("--category", help="plugin category, e.g. widgets")
+    parser.add_argument("--tag", help="plugin or theme tag")
+    parser.add_argument("--source", choices=("community", "builtin"))
+    parser.add_argument("--verified", action="store_true")
+    parser.add_argument("--sort", choices=("stars", "name", "recent"), default="stars")
+
+
 def cmd_search(args: argparse.Namespace) -> int:
     items, _ = _load(force=args.refresh)
-    query = " ".join(args.query)
-    hits = [item for item in items if item.matches(query)]
-    if args.kind:
-        hits = [item for item in hits if item.kind == args.kind]
-    hits.sort(key=lambda item: (-(item.stars or -1), item.name.lower()))
+    query = _query_from_args(args, " ".join(args.query))
+    if query.kind == "plugin":
+        hits = apply_query(items, query, "plugins")
+    elif query.kind == "theme":
+        hits = apply_query(items, query, "themes")
+    else:
+        hits = apply_query(items, query, "themes") + apply_query(items, query, "plugins")
     if not hits:
         print("no matches")
         return 1
@@ -99,12 +137,13 @@ def _act(args: argparse.Namespace, name: str) -> int:
 
 def cmd_list(args: argparse.Namespace) -> int:
     items, _ = _load(force=args.refresh)
-    rows = items
-    if args.installed:
-        rows = [item for item in rows if item.installed]
-    if args.kind:
-        rows = [item for item in rows if item.kind == args.kind]
-    rows.sort(key=lambda item: (item.kind, item.name.lower()))
+    query = _query_from_args(args)
+    if args.kind == "plugin":
+        rows = apply_query(items, query, "plugins")
+    elif args.kind == "theme":
+        rows = apply_query(items, query, "themes")
+    else:
+        rows = apply_query(items, query, "themes") + apply_query(items, query, "plugins")
     for item in rows:
         _print_item(item)
     return 0
@@ -145,10 +184,10 @@ def build_parser() -> argparse.ArgumentParser:
         shortcut.add_argument("query", nargs="*")
         shortcut.set_defaults(func=cmd_tui, tab=tab)
 
-    search = sub.add_parser("search", help="search the catalogs")
-    search.add_argument("query", nargs="+")
-    search.add_argument("--kind", choices=("theme", "plugin"))
+    search = sub.add_parser("search", help="search and filter the catalogs")
+    search.add_argument("query", nargs="*", help="words or prefixes like hue:blue is:available")
     search.add_argument("--limit", type=int, default=20)
+    _add_filter_flags(search)
     search.set_defaults(func=cmd_search)
 
     info = sub.add_parser("info", help="show one theme or plugin")
@@ -157,8 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
     info.set_defaults(func=cmd_info)
 
     listing = sub.add_parser("list", help="list catalog and local items")
-    listing.add_argument("--installed", action="store_true")
-    listing.add_argument("--kind", choices=("theme", "plugin"))
+    _add_filter_flags(listing)
     listing.set_defaults(func=cmd_list)
 
     for name, help_text in (

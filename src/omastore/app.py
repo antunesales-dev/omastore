@@ -21,6 +21,7 @@ from omastore.actions import (
 )
 from omastore.catalog import fetch_readme, load_store
 from omastore.credits import ABOUT, STATUS_CREDIT
+from omastore.filters import Query, apply_query, cycle_sort, cycle_source, cycle_status, parse_search
 from omastore.models import Item, Tab
 
 PALETTE_KEYS = [
@@ -46,25 +47,8 @@ PALETTE_KEYS = [
 ]
 
 
-def sort_items(items: list[Item], tab: Tab) -> list[Item]:
-    def key(item: Item) -> tuple:
-        stars = item.stars or -1
-        community = not item.first_party and item.source_type != "builtin"
-        return (
-            0 if item.current else 1,
-            0 if item.installed and community else 1,
-            0 if community else 1,
-            -stars,
-            item.name.lower(),
-        )
-
-    if tab == "themes":
-        filtered = [item for item in items if item.kind == "theme"]
-    elif tab == "plugins":
-        filtered = [item for item in items if item.kind == "plugin"]
-    else:
-        filtered = [item for item in items if item.installed or item.current]
-    return sorted(filtered, key=key)
+def sort_items(items: list[Item], tab: Tab, query: Query | None = None) -> list[Item]:
+    return apply_query(items, query or Query(), tab)
 
 
 def list_prompt(item: Item) -> Text:
@@ -195,6 +179,9 @@ class OmaStoreApp(App[None]):
         Binding("u", "do_update", "Update", show=True),
         Binding("x", "do_remove", "Remove", show=True),
         Binding("r", "refresh", "Refresh", show=True),
+        Binding("f", "cycle_status", "Filter", show=True),
+        Binding("v", "cycle_source", "Source", show=True),
+        Binding("s", "cycle_sort", "Sort", show=True),
         Binding("question_mark", "credits", "Credits", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
@@ -204,6 +191,8 @@ class OmaStoreApp(App[None]):
         self.start_tab = start_tab
         self.tab: Tab = start_tab
         self.search = query
+        self.filters = parse_search(query)
+        self.search = self.filters.text
         self.items: list[Item] = []
         self.shown: list[Item] = []
         self.selected: Item | None = None
@@ -217,9 +206,14 @@ class OmaStoreApp(App[None]):
                 Static("themes", id="tab-themes", classes="tab active"),
                 Static("plugins", id="tab-plugins", classes="tab"),
                 Static("installed", id="tab-installed", classes="tab"),
-                Input(placeholder="search themes and plugins", id="search", value=self.search),
+                Input(
+                    placeholder="search  ·  hue:blue  tag:bar  is:available",
+                    id="search",
+                    value=self.search,
+                ),
                 id="tabs",
             ),
+            Static(id="filters"),
             id="chrome",
         )
         yield Horizontal(
@@ -276,6 +270,18 @@ class OmaStoreApp(App[None]):
     def action_credits(self) -> None:
         self.push_screen(CreditsScreen())
 
+    def action_cycle_status(self) -> None:
+        self.filters = cycle_status(self.filters)
+        self._rebuild_list()
+
+    def action_cycle_source(self) -> None:
+        self.filters = cycle_source(self.filters)
+        self._rebuild_list()
+
+    def action_cycle_sort(self) -> None:
+        self.filters = cycle_sort(self.filters)
+        self._rebuild_list()
+
     def action_do_install(self) -> None:
         self._act("install")
 
@@ -298,6 +304,9 @@ class OmaStoreApp(App[None]):
     def on_search_changed(self, event: Input.Changed) -> None:
         self.search = event.value
         self._rebuild_list()
+
+    def _active_query(self) -> Query:
+        return parse_search(self.search, defaults=self.filters)
 
     @on(Input.Submitted, "#search")
     def on_search_submitted(self, event: Input.Submitted) -> None:
@@ -343,7 +352,7 @@ class OmaStoreApp(App[None]):
 
     def _rebuild_list(self) -> None:
         previous = self.selected.key if self.selected else ""
-        self.shown = [item for item in sort_items(self.items, self.tab) if item.matches(self.search)]
+        self.shown = apply_query(self.items, self._active_query(), self.tab)
         options = [Option(list_prompt(item), id=item.key.replace(":", "__")) for item in self.shown]
         listing = self.query_one("#list", OptionList)
         listing.clear_options()
@@ -355,6 +364,10 @@ class OmaStoreApp(App[None]):
         else:
             self.selected = None
             self._render_detail(None)
+        active = self._active_query()
+        self.query_one("#filters", Static).update(
+            f"filter  {active.label()}    [f] status  [v] source  [s] sort"
+        )
         self.query_one("#status", Static).update(
             f"{self.status_text}  ·  {len(self.shown)} shown"
         )
