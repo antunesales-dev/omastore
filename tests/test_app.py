@@ -59,6 +59,16 @@ def test_palette_skips_duplicates() -> None:
     assert styles.count("on #111111") == 1
 
 
+def test_markdown_can_skip_readme_and_show_loader() -> None:
+    item = Item(kind="theme", id="x", name="X", description="hello", readme="# huge")
+    light = item_markdown(item, include_readme=False, loading=True)
+    assert "hello" in light
+    assert "Loading about" in light
+    assert "# huge" not in light
+    full = item_markdown(item, include_readme=True)
+    assert "# huge" in full
+
+
 def test_markdown_includes_warnings() -> None:
     item = Item(
         kind="theme",

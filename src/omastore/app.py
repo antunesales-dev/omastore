@@ -95,7 +95,13 @@ def palette_text(colors: dict[str, str]) -> Text:
     return text
 
 
-def item_markdown(item: Item, readme: str | None = None) -> str:
+def item_markdown(
+    item: Item,
+    readme: str | None = None,
+    *,
+    include_readme: bool = True,
+    loading: bool = False,
+) -> str:
     bits: list[str] = []
     if item.description:
         bits.append(item.description)
@@ -135,6 +141,11 @@ def item_markdown(item: Item, readme: str | None = None) -> str:
     bits.append("")
     bits.append("Listed in a community catalog. The work belongs to its author.")
     bits.append("Community plugins and themes run unsandboxed. Read the repo before installing.")
+    if loading:
+        bits.extend(["", "---", "", "_Loading about…_"])
+        return "\n".join(bits)
+    if not include_readme:
+        return "\n".join(bits)
     body = readme if readme is not None else item.readme
     if body:
         bits.extend(["", "---", "", "## About", "", body])
@@ -214,6 +225,8 @@ class OmaStoreApp(App[None]):
         self.status_text = "loading catalogs…"
         self._readme_key = ""
         self._highlighted_at = 0.0
+        self._about_timer = None
+        self._pending_about_key = ""
 
     def compose(self) -> ComposeResult:
         yield Vertical(
@@ -366,12 +379,12 @@ class OmaStoreApp(App[None]):
     def on_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         if event.option_id:
             self._highlighted_at = time.monotonic()
-            self._select_key(event.option_id)
+            self._select_key(event.option_id, immediate=False)
 
     @on(OptionList.OptionSelected, "#list")
     def on_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option_id:
-            self._select_key(event.option_id)
+            self._select_key(event.option_id, immediate=True)
         if not self._should_activate():
             return
         self._activate_selected()
@@ -427,9 +440,10 @@ class OmaStoreApp(App[None]):
             listing.add_options(options)
             index = next((i for i, item in enumerate(self.shown) if item.key == previous), 0)
             listing.highlighted = index
-            self._select_key(self.shown[index].key.replace(":", "__"))
+            self._select_key(self.shown[index].key.replace(":", "__"), immediate=False)
         else:
             self.selected = None
+            self._cancel_about()
             self._render_detail(None)
         active = self._active_query()
         self.query_one("#filters", Static).update(
@@ -452,15 +466,44 @@ class OmaStoreApp(App[None]):
             f"{self.status_text}  ·  {len(self.shown)} shown{extra}"
         )
 
-    def _select_key(self, key: str) -> None:
+    def _select_key(self, key: str, *, immediate: bool = False) -> None:
         key = key.replace("__", ":", 1)
         item = next((row for row in self.shown if row.key == key), None)
         self.selected = item
-        self._render_detail(item)
-        if item and not item.readme:
-            self._load_readme(item.key)
+        self._render_detail(item, settled=immediate and bool(item and item.readme))
+        if item is None:
+            self._cancel_about()
+            return
+        if immediate:
+            self._show_about(item)
+        else:
+            self._schedule_about(item.key)
 
-    def _render_detail(self, item: Item | None) -> None:
+    def _cancel_about(self) -> None:
+        if self._about_timer is not None:
+            self._about_timer.stop()
+            self._about_timer = None
+        self._pending_about_key = ""
+
+    def _schedule_about(self, key: str) -> None:
+        self._cancel_about()
+        self._pending_about_key = key
+        self._about_timer = self.set_timer(0.35, self._settle_about)
+
+    def _settle_about(self) -> None:
+        self._about_timer = None
+        item = self.selected
+        if item is None or item.key != self._pending_about_key:
+            return
+        self._show_about(item)
+
+    def _show_about(self, item: Item) -> None:
+        if item.readme:
+            self._render_detail(item, settled=True)
+            return
+        self._load_readme(item.key)
+
+    def _render_detail(self, item: Item | None, *, settled: bool = False) -> None:
         meta = self.query_one("#meta", Static)
         palette = self.query_one("#palette", Static)
         readme = self.query_one("#readme", Markdown)
@@ -501,7 +544,10 @@ class OmaStoreApp(App[None]):
             header.append("    ".join(actions), style="bold")
         meta.update(header)
         palette.update(palette_text(item.colors) if item.colors else Text(""))
-        readme.update(item_markdown(item))
+        if settled and item.readme:
+            readme.update(item_markdown(item, item.readme, include_readme=True))
+        else:
+            readme.update(item_markdown(item, include_readme=False, loading=True))
 
     @work(thread=True, exclusive=True, group="readme")
     def _load_readme(self, key: str) -> None:
@@ -517,7 +563,7 @@ class OmaStoreApp(App[None]):
             return
         item.readme = text
         if self.selected and self.selected.key == key:
-            self.query_one("#readme", Markdown).update(item_markdown(item, text))
+            self._render_detail(item, settled=True)
 
     def _status(self) -> None:
         self.query_one("#status", Static).update(self.status_text)
