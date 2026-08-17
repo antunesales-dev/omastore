@@ -14,8 +14,9 @@ def test_sort_puts_current_first() -> None:
 
 def test_palette_skips_duplicates() -> None:
     text = palette_text({"background": "#111111", "color0": "#111111", "accent": "#7dcea0"})
-    assert "#7dcea0" in text.plain
-    assert text.plain.count("#111111") == 1
+    styles = [span.style for span in text.spans]
+    assert "on #7dcea0" in styles
+    assert styles.count("on #111111") == 1
 
 
 def test_markdown_includes_warnings() -> None:
@@ -30,4 +31,4 @@ def test_markdown_includes_warnings() -> None:
     md = item_markdown(item)
     assert "hello" in md
     assert "installs a vscode extension" in md
-    assert "By limehawk" in md
+    assert "By **limehawk**" in md

@@ -3,7 +3,7 @@ from __future__ import annotations
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Click
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Markdown, OptionList, Static
@@ -74,46 +74,42 @@ def palette_text(colors: dict[str, str]) -> Text:
         if not hex_color or not hex_color.startswith("#") or hex_color.lower() in seen:
             continue
         seen.add(hex_color.lower())
-        text.append("  ", style=f"on {hex_color}")
+        text.append("   ", style=f"on {hex_color}")
     if not seen:
         text.append("no palette", style="dim")
-    else:
-        text.append("  ")
-        text.append(" ".join(sorted(seen)[:6]), style="dim")
     return text
 
 
 def item_markdown(item: Item, readme: str | None = None) -> str:
-    bits = [f"# {item.name}", ""]
-    meta = [item.kind]
-    if item.author:
-        meta.append(item.author)
-    if item.category:
-        meta.append(item.category)
-    if item.hue:
-        meta.append(item.hue)
-    if item.version:
-        meta.append(item.version)
-    if item.stars is not None:
-        meta.append(f"★ {item.stars}")
-    if item.status_label:
-        meta.append(item.status_label)
-    bits.append(" · ".join(meta))
-    bits.append("")
-    if item.tags:
-        bits.append(" ".join(f"`{tag}`" for tag in item.tags))
-        bits.append("")
+    bits: list[str] = []
     if item.description:
         bits.append(item.description)
         bits.append("")
+    facts: list[str] = []
+    if item.author:
+        facts.append(f"By **{item.author}**")
+    if item.category:
+        facts.append(item.category)
+    if item.hue:
+        facts.append(item.hue)
+    if item.version:
+        facts.append(item.version)
+    if item.stars is not None:
+        facts.append(f"★ {item.stars}")
+    if item.license:
+        facts.append(item.license)
+    if facts:
+        bits.append(" · ".join(facts))
+        bits.append("")
+    if item.tags:
+        bits.append(" ".join(f"`{tag}`" for tag in item.tags))
+        bits.append("")
     if item.repo:
-        bits.append(f"Repo: {item.repo}")
-    if item.install_url:
-        bits.append(f"Install: `{item.install_url}`")
+        bits.append(item.repo)
+    if item.install_url and item.install_url != item.repo:
+        bits.append(f"`{item.install_url}`")
     if item.verification:
         bits.append(f"Verification: `{item.verification}`")
-    if item.license:
-        bits.append(f"License: {item.license}")
     if item.install_note:
         bits.append("")
         bits.append(item.install_note)
@@ -122,12 +118,11 @@ def item_markdown(item: Item, readme: str | None = None) -> str:
         bits.append("**Warnings**")
         bits.extend(f"- {warning}" for warning in item.warnings)
     bits.append("")
-    if item.author:
-        bits.append(f"By {item.author}. Listed in a community catalog; the work is theirs.")
-    bits.append("Community plugins and themes run as unsandboxed code. Review the repo before installing.")
+    bits.append("Listed in a community catalog. The work belongs to its author.")
+    bits.append("Community plugins and themes run unsandboxed. Read the repo before installing.")
     body = readme if readme is not None else item.readme
     if body:
-        bits.extend(["", "---", "", body])
+        bits.extend(["", "---", "", "## About", "", body])
     return "\n".join(bits)
 
 
@@ -219,7 +214,7 @@ class OmaStoreApp(App[None]):
         )
         yield Horizontal(
             OptionList(id="list"),
-            Vertical(
+            VerticalScroll(
                 Static(id="meta"),
                 Static(id="palette"),
                 Markdown(id="readme"),
@@ -406,11 +401,16 @@ class OmaStoreApp(App[None]):
             actions.append("[x] remove")
         header = Text()
         header.append(item.name, style="bold")
-        header.append("\n")
-        header.append(item.status_label or item.kind, style="dim")
+        header.append("\n\n")
+        subtitle = "  ·  ".join(
+            part
+            for part in (item.kind, item.author, item.status_label)
+            if part
+        )
+        header.append(subtitle or item.kind, style="dim")
         if actions:
-            header.append("\n")
-            header.append("   ".join(actions), style="green")
+            header.append("\n\n")
+            header.append("    ".join(actions), style="bold")
         meta.update(header)
         palette.update(palette_text(item.colors) if item.colors else Text(""))
         readme.update(item_markdown(item))
