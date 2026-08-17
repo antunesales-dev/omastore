@@ -11,7 +11,7 @@ from typing import Any
 
 from stall.models import Item, parse_plugin, parse_theme
 
-USER_AGENT = "stall/0.1 (+https://github.com/antunesales/stall)"
+USER_AGENT = "stall/0.1 (+https://github.com/antunesales-dev/stall)"
 THEME_CATALOG_URL = (
     "https://raw.githubusercontent.com/limehawk/omarchy-theme-website/"
     "main/src/data/themes-data.json"

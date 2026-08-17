@@ -30,7 +30,7 @@ Omarchy already knows how to install a theme or plugin from a git URL. The missi
 Needs Python 3.12+ and the `omarchy` CLI.
 
 ```bash
-git clone https://github.com/antunesales/stall.git
+git clone https://github.com/antunesales-dev/stall.git
 cd stall
 python3 -m venv .venv
 .venv/bin/pip install -e .
