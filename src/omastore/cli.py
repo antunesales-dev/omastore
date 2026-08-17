@@ -156,6 +156,15 @@ def cmd_about(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_desktop(_args: argparse.Namespace) -> int:
+    from omastore.desktop import install_desktop
+
+    for path in install_desktop():
+        print(path)
+    print("Omastore is in the app launcher (Super + Space).")
+    return 0
+
+
 def cmd_tui(args: argparse.Namespace) -> int:
     from omastore.app import run_tui
 
@@ -216,6 +225,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     about = sub.add_parser("about", help="print catalog credits")
     about.set_defaults(func=cmd_about)
+
+    desktop = sub.add_parser("desktop", help="install the Omarchy app launcher entry")
+    desktop.set_defaults(func=cmd_desktop)
     return parser
 
 

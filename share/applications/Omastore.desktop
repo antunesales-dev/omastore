@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Omastore
+GenericName=Theme and plugin store
+Comment=Dead-simple Omarchy theme and plugin store
+Exec=xdg-terminal-exec --app-id=TUI.float -e omastore
+Icon=omastore
+Terminal=false
+Categories=Settings;Utility;
+Keywords=omarchy;theme;plugin;store;omastore;
+StartupNotify=true
+StartupWMClass=TUI.float

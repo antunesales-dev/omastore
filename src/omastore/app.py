@@ -20,9 +20,10 @@ from omastore.actions import (
     update,
 )
 from omastore.catalog import fetch_readme, load_store
-from omastore.credits import ABOUT, STATUS_CREDIT
+from omastore.credits import ABOUT
 from omastore.filters import Query, apply_query, cycle_sort, cycle_source, cycle_status, parse_search
 from omastore.models import Item, Tab
+from omastore.theme import omarchy_theme_css
 
 PALETTE_KEYS = [
     "background",
@@ -163,8 +164,8 @@ class CreditsScreen(ModalScreen[None]):
 
 
 class OmaStoreApp(App[None]):
-    TITLE = "omastore"
-    SUB_TITLE = "omarchy store"
+    TITLE = "Omastore"
+    SUB_TITLE = ""
     CSS_PATH = "app.tcss"
     BINDINGS = [
         Binding("slash", "focus_search", "Search", show=True),
@@ -201,13 +202,13 @@ class OmaStoreApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("omastore  ·  the omarchy store", id="brand"),
+            Static("Omastore", id="brand"),
             Horizontal(
                 Static("themes", id="tab-themes", classes="tab active"),
                 Static("plugins", id="tab-plugins", classes="tab"),
                 Static("installed", id="tab-installed", classes="tab"),
                 Input(
-                    placeholder="search  ·  hue:blue  tag:bar  is:available",
+                    placeholder="Search",
                     id="search",
                     value=self.search,
                 ),
@@ -227,10 +228,11 @@ class OmaStoreApp(App[None]):
             id="body",
         )
         yield Static(self.status_text, id="status")
-        yield Static(STATUS_CREDIT, id="credits-line")
         yield Footer()
 
     def on_mount(self) -> None:
+        self.stylesheet.add_source(omarchy_theme_css())
+        self.refresh_css()
         self.tab = self.start_tab
         self._paint_tabs()
         if self.search:

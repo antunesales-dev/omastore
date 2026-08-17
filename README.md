@@ -66,6 +66,14 @@ Or run it from the repo:
 ./bin/omastore
 ```
 
+Put it next to Omacalc / Omacut / Omawrite in the Omarchy app launcher:
+
+```bash
+omastore desktop
+```
+
+Then Super + Space and type **Omastore**, or Super + Ctrl + O. It opens as a floating Omarchy TUI and follows the current theme colors.
+
 ## Use
 
 ```bash
