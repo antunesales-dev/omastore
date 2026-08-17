@@ -29,8 +29,17 @@ def test_list_prompt_marks_verification() -> None:
 
     verified = Item(kind="plugin", id="ok", name="Ok", verification="verified")
     unverified = Item(kind="plugin", id="raw", name="Raw", verification="unverified")
-    assert "verified" in list_prompt(verified).plain
-    assert "unverified" in list_prompt(unverified).plain
+    builtin = Item(kind="plugin", id="clock", name="Clock", first_party=True)
+    ok = list_prompt(verified)
+    raw = list_prompt(unverified)
+    clock = list_prompt(builtin)
+    assert "✓" in ok.plain
+    assert "−" in raw.plain
+    assert "verified" not in ok.plain
+    assert "unverified" not in raw.plain
+    assert "green" in str(ok.spans)
+    assert "yellow" in str(raw.spans)
+    assert clock.plain.startswith("○   Clock") or "  Clock" in clock.plain
 
 
 def test_palette_skips_duplicates() -> None:

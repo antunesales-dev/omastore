@@ -59,16 +59,16 @@ def list_prompt(item: Item) -> Text:
     mark = "●" if item.current or (item.kind == "plugin" and item.enabled) else "○"
     style = "green" if mark == "●" else "dim"
     text.append(f"{mark} ", style=style)
+    badge = item.verification_label
+    if badge == "verified":
+        text.append("✓ ", style="green")
+    elif badge == "unverified":
+        text.append("− ", style="yellow")
+    else:
+        text.append("  ")
     text.append(item.name)
     if item.stars:
         text.append(f"  ★{item.stars}", style="dim")
-    badge = item.verification_label
-    if badge == "verified":
-        text.append("  verified", style="green")
-    elif badge == "unverified":
-        text.append("  unverified", style="yellow")
-    elif badge:
-        text.append(f"  {badge}", style="dim")
     status = item.status_label
     if status:
         text.append(f"  {status}", style="dim italic")
