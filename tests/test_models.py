@@ -58,3 +58,26 @@ def test_parse_plugin_installable() -> None:
     assert item.install_url.endswith("omarchy-overview")
     assert item.matches("workspace overview")
     assert not item.first_party
+    assert item.verification_label == "unverified"
+
+
+def test_verification_label_for_verified_and_builtin() -> None:
+    verified = parse_plugin(
+        {
+            "id": "ok",
+            "name": "Ok",
+            "sourceType": "community",
+            "installAvailable": True,
+            "verificationStatus": "verified",
+        }
+    )
+    builtin = parse_plugin(
+        {
+            "id": "omarchy.clock",
+            "name": "Clock",
+            "sourceType": "builtin",
+            "verificationStatus": "",
+        }
+    )
+    assert verified.verification_label == "verified"
+    assert builtin.verification_label == ""

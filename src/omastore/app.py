@@ -60,6 +60,13 @@ def list_prompt(item: Item) -> Text:
     text.append(item.name)
     if item.stars:
         text.append(f"  ★{item.stars}", style="dim")
+    badge = item.verification_label
+    if badge == "verified":
+        text.append("  verified", style="green")
+    elif badge == "unverified":
+        text.append("  unverified", style="yellow")
+    elif badge:
+        text.append(f"  {badge}", style="dim")
     status = item.status_label
     if status:
         text.append(f"  {status}", style="dim italic")

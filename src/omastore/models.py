@@ -101,6 +101,17 @@ class Item:
         return " · ".join(parts)
 
     @property
+    def verification_label(self) -> str:
+        status = (self.verification or "").strip().lower()
+        if status in {"verified", "passed"}:
+            return "verified"
+        if self.kind != "plugin" or self.first_party or self.builtin:
+            return ""
+        if status in {"", "unverified", "failed", "needs-fixes", "review-required"}:
+            return "unverified"
+        return status
+
+    @property
     def can_install(self) -> bool:
         if self.installed or self.builtin or self.first_party:
             return False

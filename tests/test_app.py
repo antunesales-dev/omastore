@@ -12,6 +12,15 @@ def test_sort_puts_current_first() -> None:
     assert [item.id for item in ordered] == ["b", "c", "a"]
 
 
+def test_list_prompt_marks_verification() -> None:
+    from omastore.app import list_prompt
+
+    verified = Item(kind="plugin", id="ok", name="Ok", verification="verified")
+    unverified = Item(kind="plugin", id="raw", name="Raw", verification="unverified")
+    assert "verified" in list_prompt(verified).plain
+    assert "unverified" in list_prompt(unverified).plain
+
+
 def test_palette_skips_duplicates() -> None:
     text = palette_text({"background": "#111111", "color0": "#111111", "accent": "#7dcea0"})
     styles = [span.style for span in text.spans]
