@@ -67,9 +67,13 @@ def list_prompt(item: Item, width: int = 40) -> Text:
         text.append("- ", style="yellow")
     else:
         text.append("  ")
+    if getattr(item, "outdated", False):
+        text.append("↑ ", style="yellow")
+    else:
+        text.append("  ")
     star = f"*{item.stars}" if item.stars is not None and item.stars > 0 else ""
     star_width = 6
-    name_width = max(8, width - 4 - (star_width + 1 if star else 0))
+    name_width = max(8, width - 6 - (star_width + 1 if star else 0))
     text.append(set_cell_size(item.name, name_width))
     if star:
         text.append(" ")
@@ -180,6 +184,10 @@ class OmaStoreApp(App[None]):
         Binding("2", "set_tab('plugins')", "Plugins", show=True),
         Binding("3", "set_tab('installed')", "Installed", show=True),
         Binding("i", "do_install", "Install", show=True),
+        Binding("t", "try_theme", "Try", show=True),
+        Binding("b", "revert_theme", "Back", show=True),
+        Binding("o", "open_repo", "Repo", show=True),
+        Binding("c", "open_catalog", "Catalog", show=True),
         Binding("a", "do_apply", "Apply", show=True),
         Binding("e", "do_enable", "Enable", show=False),
         Binding("d", "do_disable", "Disable", show=False),
@@ -295,6 +303,38 @@ class OmaStoreApp(App[None]):
     def action_do_install(self) -> None:
         self._act("install")
 
+    def action_try_theme(self) -> None:
+        item = self.selected
+        if item is None or item.kind != "theme":
+            return
+        from omastore.preview import remember_and_apply
+
+        result = remember_and_apply(item.name)
+        self.notify(str(result.get("message") or "try"))
+        self.load_items()
+
+    def action_revert_theme(self) -> None:
+        from omastore.preview import revert
+
+        result = revert()
+        self.notify(str(result.get("message") or "revert"))
+        self.load_items()
+
+    def action_open_repo(self) -> None:
+        self._open_link("repo")
+
+    def action_open_catalog(self) -> None:
+        self._open_link("catalog")
+
+    def _open_link(self, target: str) -> None:
+        item = self.selected
+        if item is None:
+            return
+        from omastore.links import open_item
+
+        result = open_item(item, target)
+        self.notify(str(result.get("message") or target))
+
     def action_do_apply(self) -> None:
         self._act("apply")
 
@@ -395,8 +435,21 @@ class OmaStoreApp(App[None]):
         self.query_one("#filters", Static).update(
             f"filter  {active.label()}    [f] status  [v] source  [s] sort"
         )
+        extra = ""
+        try:
+            from omastore.preview import preview_status
+            from omastore.updates import outdated_items
+
+            preview = preview_status()
+            if preview.get("active"):
+                extra += f"  ·  trying {preview.get('current') or ''}  [b] back to {preview.get('previous')}"
+            n_old = len(outdated_items(self.items))
+            if n_old:
+                extra += f"  ·  {n_old} outdated"
+        except Exception:
+            extra = ""
         self.query_one("#status", Static).update(
-            f"{self.status_text}  ·  {len(self.shown)} shown"
+            f"{self.status_text}  ·  {len(self.shown)} shown{extra}"
         )
 
     def _select_key(self, key: str) -> None:
@@ -419,8 +472,13 @@ class OmaStoreApp(App[None]):
         actions = []
         if item.can_install:
             actions.append("[i] install")
+        if item.kind == "theme":
+            actions.append("[t] try")
+            actions.append("[b] back")
         if item.can_apply:
             actions.append("[a] apply")
+        actions.append("[o] repo")
+        actions.append("[c] catalog")
         if item.can_enable:
             actions.append("[e] enable")
         if item.can_disable:

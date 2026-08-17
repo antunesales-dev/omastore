@@ -5,7 +5,7 @@ from datetime import datetime
 
 from omastore.models import Item, Tab
 
-STATUS_CYCLE = ("all", "installed", "available", "extra", "stock", "current")
+STATUS_CYCLE = ("all", "installed", "available", "extra", "stock", "current", "outdated")
 SOURCE_CYCLE = ("all", "community", "builtin")
 SORT_CYCLE = ("stars", "name", "recent")
 PREFIXES = {
@@ -133,6 +133,8 @@ def matches_filters(item: Item, query: Query) -> bool:
     if query.status == "stock" and not (item.builtin and not item.extra):
         return False
     if query.status == "current" and not item.current:
+        return False
+    if query.status == "outdated" and not getattr(item, "outdated", False):
         return False
     if query.source not in {"", "all"} and _source_of(item) != query.source:
         return False

@@ -38,6 +38,15 @@ def test_apply_query_sorts_and_scopes() -> None:
     assert [item.name for item in named] == ["Aether", "Blue"]
 
 
+def test_outdated_filter() -> None:
+    items = [
+        Item(kind="theme", id="old", name="Old", extra=True, installed=True, outdated=True),
+        Item(kind="theme", id="new", name="New", extra=True, installed=True, outdated=False),
+    ]
+    shown = apply_query(items, Query(status="outdated"), "themes")
+    assert [item.id for item in shown] == ["old"]
+
+
 def test_cycle_status() -> None:
     query = cycle_status(Query())
     assert query.status == "installed"

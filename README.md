@@ -85,6 +85,11 @@ omastore search overview --kind plugin
 omastore search hue:blue is:available --sort stars
 omastore search --category widgets --tag bar --available
 omastore list --installed --source community
+omastore outdated
+omastore try theme:lumon
+omastore revert
+omastore open theme:lumon
+omastore open plugin:omarchy-overview --catalog
 omastore info theme:lumon --readme
 omastore install theme:lumon
 omastore apply lumon
@@ -106,6 +111,8 @@ omastore about
 | `s` | cycle sort |
 | `enter` | install, apply, or enable |
 | `i` | install |
+| `t` / `b` | try a theme / restore the previous one |
+| `o` / `c` | open the author repo / catalog site |
 | `a` | apply theme |
 | `e` / `d` | enable / disable plugin |
 | `u` | update |

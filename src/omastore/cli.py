@@ -165,6 +165,50 @@ def cmd_desktop(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_outdated(args: argparse.Namespace) -> int:
+    from omastore.updates import outdated_items
+
+    items, _ = _load(force=args.refresh)
+    rows = outdated_items(items)
+    if not rows:
+        print("nothing outdated")
+        return 0
+    for item in rows:
+        print(f"{item.kind:7}  {item.name}  {item.installed_rev[:8]} -> {item.latest_rev[:8]}")
+        print(f"         {item.key}")
+    return 0
+
+
+def cmd_try(args: argparse.Namespace) -> int:
+    from omastore.preview import remember_and_apply
+
+    items, _ = _load(force=args.refresh)
+    item = _find(items, args.id)
+    if item.kind != "theme":
+        raise SystemExit("try is for themes")
+    result = remember_and_apply(item.name)
+    print(result.get("message") or result)
+    return 0 if result.get("ok") else 1
+
+
+def cmd_revert(_args: argparse.Namespace) -> int:
+    from omastore.preview import revert
+
+    result = revert()
+    print(result.get("message") or result)
+    return 0 if result.get("ok") else 1
+
+
+def cmd_open(args: argparse.Namespace) -> int:
+    from omastore.links import open_item
+
+    items, _ = _load(force=args.refresh)
+    item = _find(items, args.id)
+    result = open_item(item, "catalog" if args.catalog else "repo")
+    print(result.get("message") or result)
+    return 0 if result.get("ok") else 1
+
+
 def cmd_tui(args: argparse.Namespace) -> int:
     from omastore.app import run_tui
 
@@ -228,6 +272,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     desktop = sub.add_parser("desktop", help="install the Omarchy app launcher entry")
     desktop.set_defaults(func=cmd_desktop)
+
+    outdated = sub.add_parser("outdated", help="list installed extras that can update")
+    outdated.set_defaults(func=cmd_outdated)
+
+    try_cmd = sub.add_parser("try", help="preview a theme; remember the previous one")
+    try_cmd.add_argument("id")
+    try_cmd.set_defaults(func=cmd_try)
+
+    revert_cmd = sub.add_parser("revert", help="restore the theme from before try")
+    revert_cmd.set_defaults(func=cmd_revert)
+
+    open_cmd = sub.add_parser("open", help="open the author repo or catalog site")
+    open_cmd.add_argument("id")
+    open_cmd.add_argument("--catalog", action="store_true", help="open the catalog homepage")
+    open_cmd.set_defaults(func=cmd_open)
     return parser
 
 
