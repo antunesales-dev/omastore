@@ -1,15 +1,15 @@
 # omastore
 
-The Omarchy store in your terminal.
+A terminal client for catalogs other people already built.
 
-Search, preview, read about, and install [community themes](https://omarchytheme.com) and [community plugins](https://omarchyplugins.com) without opening a browser. Installs go through the official `omarchy theme` and `omarchy plugin` commands.
+This is not a competing store. [omarchytheme.com](https://omarchytheme.com) (limehawk) and [omarchyplugins.com](https://omarchyplugins.com) (HANCORE) remain the catalogs. omastore is another way to look at the same public listings from the keyboard, then install with the official `omarchy theme` and `omarchy plugin` commands those sites already document.
 
 ```
 $ omastore
 ```
 
 ```
-omastore  ·  the omarchy store
+Omastore
  themes   plugins   installed     / search…
 
  ● Vantablack          stock · current     VANTABLACK
@@ -31,7 +31,7 @@ It is meant to stay simple.
 4. Read the name, author, palette or README on the right.
 5. Press `enter` (or `i`) to install. omastore asks first, then runs the official `omarchy` command.
 
-You do not browse a new store. You browse **their** catalogs, then Omarchy does the install.
+You do not browse a new store. You browse **their** catalogs, then Omarchy does the install. How we relate to those projects is in [COMMUNITY.md](COMMUNITY.md).
 
 ## Credits
 
@@ -46,7 +46,7 @@ omastore does not create or host the listings.
 
 The plugin marketplace itself credits [bjarneo](https://github.com/bjarneo) for interface inspiration and limehawk's theme site for its submission workflow.
 
-Press `?` in the TUI, or run `omastore about`. Full third-party rights notes are in [NOTICE.md](NOTICE.md).
+Press `?` in the TUI, or run `omastore about`. Full third-party rights notes are in [NOTICE.md](NOTICE.md). How this relates to the catalogs, and a note you can send the authors, is in [COMMUNITY.md](COMMUNITY.md).
 
 ## Install
 

@@ -2,8 +2,8 @@
 Version=1.0
 Type=Application
 Name=Omastore
-GenericName=Theme and plugin store
-Comment=Dead-simple Omarchy theme and plugin store
+GenericName=Community catalog browser
+Comment=Browse limehawk and HANCORE's Omarchy catalogs in the terminal
 Exec=xdg-terminal-exec --app-id=TUI.float -e omastore
 Icon=omastore
 Terminal=false

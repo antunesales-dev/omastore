@@ -20,7 +20,7 @@ from omastore.actions import (
     update,
 )
 from omastore.catalog import fetch_readme, load_store
-from omastore.credits import ABOUT
+from omastore.credits import ABOUT, STATUS_CREDIT
 from omastore.filters import Query, apply_query, cycle_sort, cycle_source, cycle_status, parse_search
 from omastore.models import Item, Tab
 from omastore.theme import omarchy_theme_css
@@ -197,7 +197,7 @@ class OmaStoreApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("Omastore", id="brand"),
+            Static("Omastore  ·  a client for their catalogs", id="brand"),
             Horizontal(
                 Static("themes", id="tab-themes", classes="tab active"),
                 Static("plugins", id="tab-plugins", classes="tab"),
@@ -223,6 +223,7 @@ class OmaStoreApp(App[None]):
             id="body",
         )
         yield Static(self.status_text, id="status")
+        yield Static(STATUS_CREDIT, id="credits-line")
         yield Footer()
 
     def on_mount(self) -> None:
