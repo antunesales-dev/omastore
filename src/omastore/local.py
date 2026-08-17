@@ -17,9 +17,61 @@ def user_themes_dir() -> Path:
     return _home() / ".config" / "omarchy" / "themes"
 
 
+def user_plugins_dir() -> Path:
+    return _home() / ".config" / "omarchy" / "plugins"
+
+
 def stock_themes_dir() -> Path:
     omarchy = os.environ.get("OMARCHY_PATH", "/usr/share/omarchy")
     return Path(omarchy) / "themes"
+
+
+def _git_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def git_head(path: Path) -> str:
+    try:
+        if not path.exists():
+            return ""
+        completed = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            env=_git_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout.strip()
+
+
+def _existing_child(root: Path, name: str) -> Path | None:
+    if not name:
+        return None
+    direct = root / name
+    if direct.is_dir() or direct.is_symlink():
+        return direct
+    if not root.is_dir():
+        return None
+    needle = name.lower()
+    for entry in root.iterdir():
+        if entry.name.lower() == needle and (entry.is_dir() or entry.is_symlink()):
+            return entry
+    return None
+
+
+def installed_theme_path(slug: str) -> Path | None:
+    return _existing_child(user_themes_dir(), slug)
+
+
+def installed_plugin_path(plugin_id: str) -> Path | None:
+    return _existing_child(user_plugins_dir(), plugin_id)
 
 
 def run_omarchy(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:

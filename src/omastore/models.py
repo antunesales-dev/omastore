@@ -77,10 +77,17 @@ class Item:
     extra: bool = False
     first_party: bool = False
     local_only: bool = False
+    installed_rev: str = ""
+    latest_rev: str = ""
+    outdated: bool = False
 
     @property
     def key(self) -> str:
         return f"{self.kind}:{self.id}"
+
+    @property
+    def is_outdated(self) -> bool:
+        return bool(self.outdated)
 
     @property
     def status_label(self) -> str:
