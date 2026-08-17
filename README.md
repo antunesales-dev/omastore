@@ -1,15 +1,15 @@
-# stall
+# omastore
 
 The Omarchy store in your terminal.
 
 Search, preview, read about, and install [community themes](https://omarchytheme.com) and [community plugins](https://omarchyplugins.com) without opening a browser. Installs go through the official `omarchy theme` and `omarchy plugin` commands.
 
 ```
-$ stall
+$ omastore
 ```
 
 ```
-stall  ·  the omarchy store
+omastore  ·  the omarchy store
  themes   plugins   installed     / search…
 
  ● Vantablack          stock · current     VANTABLACK
@@ -19,7 +19,7 @@ stall  ·  the omarchy store
                                            A cold corporate Omarchy theme…
 ```
 
-Not affiliated with Omarchy, 37signals, [omarchythemes.com](https://omarchythemes.com), or [omarchyplugins.com](https://omarchyplugins.com). Those sites stay the galleries. stall is a terminal client for the same catalogs.
+Not affiliated with Omarchy, 37signals, [omarchythemes.com](https://omarchythemes.com), or [omarchyplugins.com](https://omarchyplugins.com). Those sites stay the galleries. omastore is a terminal client for the same catalogs.
 
 ## Why
 
@@ -30,34 +30,34 @@ Omarchy already knows how to install a theme or plugin from a git URL. The missi
 Needs Python 3.12+ and the `omarchy` CLI.
 
 ```bash
-git clone https://github.com/antunesales-dev/stall.git
-cd stall
+git clone https://github.com/antunesales-dev/omastore.git
+cd omastore
 python3 -m venv .venv
 .venv/bin/pip install -e .
-ln -sf "$PWD/bin/stall" ~/.local/bin/stall
+ln -sf "$PWD/bin/omastore" ~/.local/bin/omastore
 ```
 
 Or run it from the repo:
 
 ```bash
-./bin/stall
+./bin/omastore
 ```
 
 ## Use
 
 ```bash
-stall                     # TUI
-stall plugins             # not a subcommand — use:
-stall tui --tab plugins
-stall search lumon
-stall search overview --kind plugin
-stall info theme:lumon --readme
-stall install theme:lumon
-stall apply lumon
-stall install plugin:omarchy-overview
-stall remove plugin:omarchy-overview
-stall list --installed
-stall refresh
+omastore                          # TUI
+omastore plugins                  # TUI on the plugins tab
+omastore tui --tab plugins
+omastore search lumon
+omastore search overview --kind plugin
+omastore info theme:lumon --readme
+omastore install theme:lumon
+omastore apply lumon
+omastore install plugin:omarchy-overview
+omastore remove plugin:omarchy-overview
+omastore list --installed
+omastore refresh
 ```
 
 ### TUI keys
@@ -82,11 +82,11 @@ Theme preview is the 16-color palette from the catalog. Plugin detail is the mar
 - Themes: [limehawk/omarchy-theme-website](https://github.com/limehawk/omarchy-theme-website) `themes-data.json` (the data behind [omarchytheme.com](https://omarchytheme.com))
 - Plugins: [HANCORE-linux/omarchy-plugin-marketplace](https://github.com/HANCORE-linux/omarchy-plugin-marketplace) `site/catalog.json` (the data behind [omarchyplugins.com](https://omarchyplugins.com))
 
-Catalogs cache under `~/.cache/stall/` for six hours. `stall refresh` fetches them again.
+Catalogs cache under `~/.cache/omastore/` for six hours. `omastore refresh` fetches them again.
 
 ## Safety
 
-Community themes and plugins are third-party code. Plugins run unsandboxed inside `omarchy-shell`. stall shows the repo, verification status, and any catalog warnings, then calls:
+Community themes and plugins are third-party code. Plugins run unsandboxed inside `omarchy-shell`. omastore shows the repo, verification status, and any catalog warnings, then calls:
 
 ```bash
 omarchy theme install <url>

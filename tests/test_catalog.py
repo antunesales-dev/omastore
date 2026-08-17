@@ -1,6 +1,6 @@
-from stall.catalog import Catalogs
-from stall.local import LocalState, overlay
-from stall.models import Item
+from omastore.catalog import Catalogs
+from omastore.local import LocalState, overlay
+from omastore.models import Item
 
 
 def test_find_by_kind_and_name() -> None:

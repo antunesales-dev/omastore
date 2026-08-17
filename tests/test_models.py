@@ -1,4 +1,4 @@
-from stall.models import parse_plugin, parse_theme, slugify, theme_install_url
+from omastore.models import parse_plugin, parse_theme, slugify, theme_install_url
 
 
 def test_slugify_display_names() -> None:

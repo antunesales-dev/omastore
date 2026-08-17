@@ -4,10 +4,10 @@ import argparse
 import sys
 from typing import Sequence
 
-from stall import __version__
-from stall.actions import apply_theme, disable_plugin, enable_plugin, install, remove, update
-from stall.catalog import load_store
-from stall.models import Item, Tab
+from omastore import __version__
+from omastore.actions import apply_theme, disable_plugin, enable_plugin, install, remove, update
+from omastore.catalog import load_store
+from omastore.models import Item, Tab
 
 
 def _load(force: bool = False) -> tuple[list[Item], object]:
@@ -19,7 +19,7 @@ def _load(force: bool = False) -> tuple[list[Item], object]:
 
 
 def _find(items: list[Item], token: str) -> Item:
-    from stall.catalog import Catalogs
+    from omastore.catalog import Catalogs
 
     catalogs = Catalogs(
         themes=[item for item in items if item.kind == "theme"],
@@ -27,7 +27,7 @@ def _find(items: list[Item], token: str) -> Item:
     )
     item = catalogs.find(token)
     if item is None:
-        raise SystemExit(f"nothing named {token!r}. Try: stall search {token}")
+        raise SystemExit(f"nothing named {token!r}. Try: omastore search {token}")
     return item
 
 
@@ -74,7 +74,7 @@ def cmd_info(args: argparse.Namespace) -> int:
     items, _ = _load(force=args.refresh)
     item = _find(items, args.id)
     if args.readme and not item.readme:
-        from stall.catalog import fetch_readme
+        from omastore.catalog import fetch_readme
 
         item.readme = fetch_readme(item)
     _print_item(item, verbose=True)
@@ -111,7 +111,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
-    from stall.app import run_tui
+    from omastore.app import run_tui
 
     tab: Tab = args.tab
     run_tui(tab=tab, query=" ".join(args.query))
@@ -120,10 +120,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="stall",
+        prog="omastore",
         description="Search, preview, and install Omarchy themes and plugins without a browser.",
     )
-    parser.add_argument("--version", action="version", version=f"stall {__version__}")
+    parser.add_argument("--version", action="version", version=f"omastore {__version__}")
     parser.add_argument("--refresh", action="store_true", help="ignore cached catalogs")
     parser.add_argument("--dry-run", action="store_true", help="print omarchy commands without running them")
     sub = parser.add_subparsers(dest="cmd")

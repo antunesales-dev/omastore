@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from stall.models import Item, slugify
+from omastore.models import Item, slugify
 
 
 def _home() -> Path:

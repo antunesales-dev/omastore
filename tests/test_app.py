@@ -1,5 +1,5 @@
-from stall.app import item_markdown, palette_text, sort_items
-from stall.models import Item
+from omastore.app import item_markdown, palette_text, sort_items
+from omastore.models import Item
 
 
 def test_sort_puts_current_first() -> None:

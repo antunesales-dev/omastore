@@ -6,6 +6,6 @@ while [[ -L $SOURCE ]]; do
 done
 ROOT="$(cd "$(dirname "$SOURCE")/.." && pwd)"
 if [[ -x $ROOT/.venv/bin/python ]]; then
-  exec "$ROOT/.venv/bin/python" -m stall "$@"
+  exec "$ROOT/.venv/bin/python" -m omastore "$@"
 fi
-exec python3 -m stall "$@"
+exec python3 -m omastore "$@"

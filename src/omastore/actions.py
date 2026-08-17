@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from stall.local import run_omarchy
-from stall.models import Item
+from omastore.local import run_omarchy
+from omastore.models import Item
 
 
 @dataclass

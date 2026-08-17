@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from stall.models import Item, parse_plugin, parse_theme
+from omastore.models import Item, parse_plugin, parse_theme
 
-USER_AGENT = "stall/0.1 (+https://github.com/antunesales-dev/stall)"
+USER_AGENT = "omastore/0.1 (+https://github.com/antunesales-dev/omastore)"
 THEME_CATALOG_URL = (
     "https://raw.githubusercontent.com/limehawk/omarchy-theme-website/"
     "main/src/data/themes-data.json"
@@ -25,7 +25,7 @@ DEFAULT_TTL = 6 * 60 * 60
 
 def cache_dir() -> Path:
     root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    path = root / "stall"
+    path = root / "omastore"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -141,7 +141,7 @@ def load_catalogs(*, force: bool = False) -> Catalogs:
 
 
 def load_store(*, force: bool = False) -> tuple[Catalogs, list[Item], object]:
-    from stall.local import load_local, overlay
+    from omastore.local import load_local, overlay
 
     catalogs = load_catalogs(force=force)
     local = load_local()

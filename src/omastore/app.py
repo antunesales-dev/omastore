@@ -10,7 +10,7 @@ from textual.widgets import Footer, Input, Markdown, OptionList, Static
 from textual.widgets.option_list import Option
 from rich.text import Text
 
-from stall.actions import (
+from omastore.actions import (
     ActionResult,
     apply_theme,
     disable_plugin,
@@ -19,8 +19,8 @@ from stall.actions import (
     remove,
     update,
 )
-from stall.catalog import fetch_readme, load_store
-from stall.models import Item, Tab
+from omastore.catalog import fetch_readme, load_store
+from omastore.models import Item, Tab
 
 PALETTE_KEYS = [
     "background",
@@ -163,8 +163,8 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class StallApp(App[None]):
-    TITLE = "stall"
+class OmaStoreApp(App[None]):
+    TITLE = "omastore"
     SUB_TITLE = "omarchy store"
     CSS_PATH = "app.tcss"
     BINDINGS = [
@@ -196,7 +196,7 @@ class StallApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("stall  ·  the omarchy store", id="brand"),
+            Static("omastore  ·  the omarchy store", id="brand"),
             Horizontal(
                 Static("themes", id="tab-themes", classes="tab active"),
                 Static("plugins", id="tab-plugins", classes="tab"),
@@ -448,4 +448,4 @@ class StallApp(App[None]):
 
 
 def run_tui(tab: Tab = "themes", query: str = "") -> None:
-    StallApp(start_tab=tab, query=query).run()
+    OmaStoreApp(start_tab=tab, query=query).run()

@@ -3,13 +3,13 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "stall"
+name = "omastore"
 version = "0.1.0"
 description = "The Omarchy store in your terminal — search, preview, read, and install themes and plugins."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"
-authors = [{ name = "stall contributors" }]
+authors = [{ name = "omastore contributors" }]
 keywords = ["omarchy", "tui", "themes", "plugins", "linux"]
 classifiers = [
   "Environment :: Console",
@@ -23,17 +23,17 @@ dependencies = ["textual>=2,<9"]
 dev = ["pytest>=8"]
 
 [project.scripts]
-stall = "stall.cli:main"
+omastore = "omastore.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/antunesales-dev/stall"
-Source = "https://github.com/antunesales-dev/stall"
+Homepage = "https://github.com/antunesales-dev/omastore"
+Source = "https://github.com/antunesales-dev/omastore"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-stall = ["*.tcss"]
+omastore = ["*.tcss"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
