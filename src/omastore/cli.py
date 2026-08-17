@@ -110,6 +110,13 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_about(_args: argparse.Namespace) -> int:
+    from omastore.credits import ABOUT
+
+    print(ABOUT)
+    return 0
+
+
 def cmd_tui(args: argparse.Namespace) -> int:
     from omastore.app import run_tui
 
@@ -168,6 +175,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     refresh = sub.add_parser("refresh", help="download fresh catalogs")
     refresh.set_defaults(func=lambda args: (_load(force=True), print("catalogs refreshed"))[1] or 0)
+
+    about = sub.add_parser("about", help="print catalog credits")
+    about.set_defaults(func=cmd_about)
     return parser
 
 

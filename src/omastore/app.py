@@ -20,6 +20,7 @@ from omastore.actions import (
     update,
 )
 from omastore.catalog import fetch_readme, load_store
+from omastore.credits import ABOUT, STATUS_CREDIT
 from omastore.models import Item, Tab
 
 PALETTE_KEYS = [
@@ -136,6 +137,8 @@ def item_markdown(item: Item, readme: str | None = None) -> str:
         bits.append("**Warnings**")
         bits.extend(f"- {warning}" for warning in item.warnings)
     bits.append("")
+    if item.author:
+        bits.append(f"By {item.author}. Listed in a community catalog; the work is theirs.")
     bits.append("Community plugins and themes run as unsandboxed code. Review the repo before installing.")
     body = readme if readme is not None else item.readme
     if body:
@@ -163,6 +166,18 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class CreditsScreen(ModalScreen[None]):
+    BINDINGS = [
+        Binding("escape,q,enter,question_mark", "close", "Close", show=False),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Markdown(ABOUT, id="credits")
+
+    def action_close(self) -> None:
+        self.dismiss()
+
+
 class OmaStoreApp(App[None]):
     TITLE = "omastore"
     SUB_TITLE = "omarchy store"
@@ -180,6 +195,7 @@ class OmaStoreApp(App[None]):
         Binding("u", "do_update", "Update", show=True),
         Binding("x", "do_remove", "Remove", show=True),
         Binding("r", "refresh", "Refresh", show=True),
+        Binding("question_mark", "credits", "Credits", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
 
@@ -217,6 +233,7 @@ class OmaStoreApp(App[None]):
             id="body",
         )
         yield Static(self.status_text, id="status")
+        yield Static(STATUS_CREDIT, id="credits-line")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -255,6 +272,9 @@ class OmaStoreApp(App[None]):
         self.status_text = "refreshing catalogs…"
         self._status()
         self.load_items(force=True)
+
+    def action_credits(self) -> None:
+        self.push_screen(CreditsScreen())
 
     def action_do_install(self) -> None:
         self._act("install")

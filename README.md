@@ -19,11 +19,33 @@ omastore  ·  the omarchy store
                                            A cold corporate Omarchy theme…
 ```
 
-Not affiliated with Omarchy, 37signals, [omarchythemes.com](https://omarchythemes.com), or [omarchyplugins.com](https://omarchyplugins.com). Those sites stay the galleries. omastore is a terminal client for the same catalogs.
+Not affiliated with Omarchy, 37signals, or the community catalog sites. Those sites stay the galleries. omastore is a terminal client for the same catalogs.
 
-## Why
+## How it works
 
-Omarchy already knows how to install a theme or plugin from a git URL. The missing piece is finding one without leaving the keyboard: search, read the README, see the palette, then install.
+It is meant to stay simple.
+
+1. Open `omastore`.
+2. Type `/` and search, or press `1` / `2` / `3` for themes, plugins, or what you already have.
+3. Read the name, author, palette or README on the right.
+4. Press `enter` (or `i`) to install. omastore asks first, then runs the official `omarchy` command.
+
+You do not browse a new store. You browse **their** catalogs, then Omarchy does the install.
+
+## Credits
+
+omastore does not create or host the listings.
+
+| What you see | Who made it |
+| --- | --- |
+| Theme catalog | **[limehawk](https://github.com/limehawk)** — [omarchytheme.com](https://omarchytheme.com) · [omarchy-theme-website](https://github.com/limehawk/omarchy-theme-website) |
+| Plugin catalog | **[HANCORE](https://github.com/HANCORE-linux)** — [omarchyplugins.com](https://omarchyplugins.com) · [omarchy-plugin-marketplace](https://github.com/HANCORE-linux/omarchy-plugin-marketplace) |
+| Each theme or plugin | The author named on the item (and their GitHub repo) |
+| Install / enable / remove | Official **Omarchy** CLI |
+
+The plugin marketplace itself credits [bjarneo](https://github.com/bjarneo) for interface inspiration and limehawk's theme site for its submission workflow.
+
+Press `?` in the TUI, or run `omastore about`. Full third-party rights notes are in [NOTICE.md](NOTICE.md).
 
 ## Install
 
@@ -58,6 +80,7 @@ omastore install plugin:omarchy-overview
 omastore remove plugin:omarchy-overview
 omastore list --installed
 omastore refresh
+omastore about
 ```
 
 ### TUI keys
@@ -73,6 +96,7 @@ omastore refresh
 | `u` | update |
 | `x` | remove |
 | `r` | refresh catalogs |
+| `?` | credits |
 | `q` | quit |
 
 Theme preview is the 16-color palette from the catalog. Plugin detail is the marketplace listing plus the upstream README.

@@ -24,8 +24,10 @@ def test_markdown_includes_warnings() -> None:
         id="x",
         name="X",
         description="hello",
+        author="limehawk",
         warnings=["installs a vscode extension"],
     )
     md = item_markdown(item)
     assert "hello" in md
     assert "installs a vscode extension" in md
+    assert "By limehawk" in md

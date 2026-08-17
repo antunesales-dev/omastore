@@ -94,6 +94,22 @@ Footer {
     background: #1a1a1a;
 }
 
+#credits-line {
+    height: 1;
+    color: #666666;
+    padding: 0 1;
+    background: #1a1a1a;
+}
+
+#credits {
+    width: 78;
+    height: auto;
+    max-height: 90%;
+    padding: 1 2;
+    background: #1a1a1a;
+    border: tall #7dcea0;
+}
+
 .badge {
     color: #7dcea0;
 }
