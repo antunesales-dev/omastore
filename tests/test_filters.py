@@ -41,3 +41,14 @@ def test_apply_query_sorts_and_scopes() -> None:
 def test_cycle_status() -> None:
     query = cycle_status(Query())
     assert query.status == "installed"
+
+
+def test_plugins_sort_installed_then_az() -> None:
+    items = [
+        Item(kind="plugin", id="z", name="Zebra", installed=False),
+        Item(kind="plugin", id="b", name="Beta", installed=True),
+        Item(kind="plugin", id="a", name="Alpha", installed=False),
+        Item(kind="plugin", id="c", name="Clock", installed=True),
+    ]
+    shown = apply_query(items, Query(), "plugins")
+    assert [item.name for item in shown] == ["Beta", "Clock", "Alpha", "Zebra"]
