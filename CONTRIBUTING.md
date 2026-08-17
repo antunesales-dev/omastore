@@ -24,6 +24,7 @@ The PR waits in line. CI must pass, review comments must be resolved, and a main
 - Pushes or PRs that rewrite `main` history
 - Secrets, tokens, or credentials
 - Changes that drop credit for the theme or plugin catalogs
+- Positioning omastore as official Omarchy or as a rival store
 - Unrelated drive-by refactors
 
 ## Security

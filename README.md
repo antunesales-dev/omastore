@@ -1,15 +1,15 @@
 # omastore
 
-The Omarchy store in your terminal.
+A terminal client for catalogs other people already built.
 
-Search, preview, read about, and install [community themes](https://omarchytheme.com) and [community plugins](https://omarchyplugins.com) without opening a browser. Installs go through the official `omarchy theme` and `omarchy plugin` commands.
+This is not a competing store. [omarchytheme.com](https://omarchytheme.com) (limehawk) and [omarchyplugins.com](https://omarchyplugins.com) (HANCORE) remain the catalogs. omastore is another way to look at the same public listings from the keyboard, then install with the official `omarchy theme` and `omarchy plugin` commands those sites already document.
 
 ```
 $ omastore
 ```
 
 ```
-omastore  ·  the omarchy store
+Omastore
  themes   plugins   installed     / search…
 
  ● Vantablack          stock · current     VANTABLACK
@@ -28,10 +28,10 @@ It is meant to stay simple.
 1. Open `omastore`.
 2. Type `/` and search, or press `1` / `2` / `3` for themes, plugins, or what you already have.
 3. Filter with `f` (installed / available / extra / stock), `v` (community / built-in), and `s` (stars / name / recent). You can also type prefixes in the search box: `hue:blue`, `tag:bar`, `is:available`, `src:community`.
-4. Read the name, author, palette or README on the right.
+4. Read the name, author, palette or README on the right. Plugin rows show a green **✓** when the HANCORE catalog verified them, or a yellow **−** when they are unverified. Filter with `verified:yes` or `--verified`.
 5. Press `enter` (or `i`) to install. omastore asks first, then runs the official `omarchy` command.
 
-You do not browse a new store. You browse **their** catalogs, then Omarchy does the install.
+You do not browse a new store. You browse **their** catalogs, then Omarchy does the install. How we relate to those projects is in [COMMUNITY.md](COMMUNITY.md).
 
 ## Credits
 
@@ -46,7 +46,7 @@ omastore does not create or host the listings.
 
 The plugin marketplace itself credits [bjarneo](https://github.com/bjarneo) for interface inspiration and limehawk's theme site for its submission workflow.
 
-Press `?` in the TUI, or run `omastore about`. Full third-party rights notes are in [NOTICE.md](NOTICE.md).
+Press `?` in the TUI, or run `omastore about`. Full third-party rights notes are in [NOTICE.md](NOTICE.md). How this relates to the catalogs, and a note you can send the authors, is in [COMMUNITY.md](COMMUNITY.md).
 
 ## Install
 
@@ -66,6 +66,14 @@ Or run it from the repo:
 ./bin/omastore
 ```
 
+Put it next to Omacalc / Omacut / Omawrite in the Omarchy app launcher:
+
+```bash
+omastore desktop
+```
+
+Then Super + Space and type **Omastore**, or Super + Ctrl + O. It opens as a floating Omarchy TUI and follows the current theme colors.
+
 ## Use
 
 ```bash
@@ -77,6 +85,11 @@ omastore search overview --kind plugin
 omastore search hue:blue is:available --sort stars
 omastore search --category widgets --tag bar --available
 omastore list --installed --source community
+omastore outdated
+omastore try theme:lumon
+omastore revert
+omastore open theme:lumon
+omastore open plugin:omarchy-overview --catalog
 omastore info theme:lumon --readme
 omastore install theme:lumon
 omastore apply lumon
@@ -98,6 +111,8 @@ omastore about
 | `s` | cycle sort |
 | `enter` | install, apply, or enable |
 | `i` | install |
+| `t` / `b` | try a theme / restore the previous one |
+| `o` / `c` | open the author repo / catalog site |
 | `a` | apply theme |
 | `e` / `d` | enable / disable plugin |
 | `u` | update |

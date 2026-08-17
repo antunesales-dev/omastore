@@ -77,10 +77,17 @@ class Item:
     extra: bool = False
     first_party: bool = False
     local_only: bool = False
+    installed_rev: str = ""
+    latest_rev: str = ""
+    outdated: bool = False
 
     @property
     def key(self) -> str:
         return f"{self.kind}:{self.id}"
+
+    @property
+    def is_outdated(self) -> bool:
+        return bool(self.outdated)
 
     @property
     def status_label(self) -> str:
@@ -99,6 +106,17 @@ class Item:
         elif self.extra:
             parts.append("extra")
         return " · ".join(parts)
+
+    @property
+    def verification_label(self) -> str:
+        status = (self.verification or "").strip().lower()
+        if status in {"verified", "passed"}:
+            return "verified"
+        if self.kind != "plugin" or self.first_party or self.builtin:
+            return ""
+        if status in {"", "unverified", "failed", "needs-fixes", "review-required"}:
+            return "unverified"
+        return status
 
     @property
     def can_install(self) -> bool:

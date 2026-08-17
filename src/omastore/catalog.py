@@ -143,9 +143,12 @@ def load_catalogs(*, force: bool = False) -> Catalogs:
 def load_store(*, force: bool = False) -> tuple[Catalogs, list[Item], object]:
     from omastore.local import load_local, overlay
 
+    from omastore.updates import mark_outdated
+
     catalogs = load_catalogs(force=force)
     local = load_local()
     items = overlay(catalogs.all_items(), local)
+    items = mark_outdated(items, local)
     return catalogs, items, local
 
 

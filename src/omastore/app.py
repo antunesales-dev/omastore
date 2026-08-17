@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import time
+
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Click
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Markdown, OptionList, Static
 from textual.widgets.option_list import Option
+from rich.cells import set_cell_size
 from rich.text import Text
 
 from omastore.actions import (
@@ -23,6 +26,7 @@ from omastore.catalog import fetch_readme, load_store
 from omastore.credits import ABOUT, STATUS_CREDIT
 from omastore.filters import Query, apply_query, cycle_sort, cycle_source, cycle_status, parse_search
 from omastore.models import Item, Tab
+from omastore.theme import omarchy_theme_css
 
 PALETTE_KEYS = [
     "background",
@@ -51,17 +55,29 @@ def sort_items(items: list[Item], tab: Tab, query: Query | None = None) -> list[
     return apply_query(items, query or Query(), tab)
 
 
-def list_prompt(item: Item) -> Text:
+def list_prompt(item: Item, width: int = 40) -> Text:
     text = Text()
     mark = "●" if item.current or (item.kind == "plugin" and item.enabled) else "○"
     style = "green" if mark == "●" else "dim"
     text.append(f"{mark} ", style=style)
-    text.append(item.name)
-    if item.stars:
-        text.append(f"  ★{item.stars}", style="dim")
-    status = item.status_label
-    if status:
-        text.append(f"  {status}", style="dim italic")
+    badge = item.verification_label
+    if badge == "verified":
+        text.append("✓ ", style="green")
+    elif badge == "unverified":
+        text.append("- ", style="yellow")
+    else:
+        text.append("  ")
+    if getattr(item, "outdated", False):
+        text.append("↑ ", style="yellow")
+    else:
+        text.append("  ")
+    star = f"*{item.stars}" if item.stars is not None and item.stars > 0 else ""
+    star_width = 6
+    name_width = max(8, width - 6 - (star_width + 1 if star else 0))
+    text.append(set_cell_size(item.name, name_width))
+    if star:
+        text.append(" ")
+        text.append(f"{star:>{star_width}}", style="dim")
     return text
 
 
@@ -73,46 +89,48 @@ def palette_text(colors: dict[str, str]) -> Text:
         if not hex_color or not hex_color.startswith("#") or hex_color.lower() in seen:
             continue
         seen.add(hex_color.lower())
-        text.append("  ", style=f"on {hex_color}")
+        text.append("   ", style=f"on {hex_color}")
     if not seen:
         text.append("no palette", style="dim")
-    else:
-        text.append("  ")
-        text.append(" ".join(sorted(seen)[:6]), style="dim")
     return text
 
 
-def item_markdown(item: Item, readme: str | None = None) -> str:
-    bits = [f"# {item.name}", ""]
-    meta = [item.kind]
-    if item.author:
-        meta.append(item.author)
-    if item.category:
-        meta.append(item.category)
-    if item.hue:
-        meta.append(item.hue)
-    if item.version:
-        meta.append(item.version)
-    if item.stars is not None:
-        meta.append(f"★ {item.stars}")
-    if item.status_label:
-        meta.append(item.status_label)
-    bits.append(" · ".join(meta))
-    bits.append("")
-    if item.tags:
-        bits.append(" ".join(f"`{tag}`" for tag in item.tags))
-        bits.append("")
+def item_markdown(
+    item: Item,
+    readme: str | None = None,
+    *,
+    include_readme: bool = True,
+    loading: bool = False,
+) -> str:
+    bits: list[str] = []
     if item.description:
         bits.append(item.description)
         bits.append("")
+    facts: list[str] = []
+    if item.author:
+        facts.append(f"By **{item.author}**")
+    if item.category:
+        facts.append(item.category)
+    if item.hue:
+        facts.append(item.hue)
+    if item.version:
+        facts.append(item.version)
+    if item.stars is not None:
+        facts.append(f"★ {item.stars}")
+    if item.license:
+        facts.append(item.license)
+    if facts:
+        bits.append(" · ".join(facts))
+        bits.append("")
+    if item.tags:
+        bits.append(" ".join(f"`{tag}`" for tag in item.tags))
+        bits.append("")
     if item.repo:
-        bits.append(f"Repo: {item.repo}")
-    if item.install_url:
-        bits.append(f"Install: `{item.install_url}`")
+        bits.append(item.repo)
+    if item.install_url and item.install_url != item.repo:
+        bits.append(f"`{item.install_url}`")
     if item.verification:
         bits.append(f"Verification: `{item.verification}`")
-    if item.license:
-        bits.append(f"License: {item.license}")
     if item.install_note:
         bits.append("")
         bits.append(item.install_note)
@@ -121,12 +139,16 @@ def item_markdown(item: Item, readme: str | None = None) -> str:
         bits.append("**Warnings**")
         bits.extend(f"- {warning}" for warning in item.warnings)
     bits.append("")
-    if item.author:
-        bits.append(f"By {item.author}. Listed in a community catalog; the work is theirs.")
-    bits.append("Community plugins and themes run as unsandboxed code. Review the repo before installing.")
+    bits.append("Listed in a community catalog. The work belongs to its author.")
+    bits.append("Community plugins and themes run unsandboxed. Read the repo before installing.")
+    if loading:
+        bits.extend(["", "---", "", "_Loading about…_"])
+        return "\n".join(bits)
+    if not include_readme:
+        return "\n".join(bits)
     body = readme if readme is not None else item.readme
     if body:
-        bits.extend(["", "---", "", body])
+        bits.extend(["", "---", "", "## About", "", body])
     return "\n".join(bits)
 
 
@@ -163,8 +185,8 @@ class CreditsScreen(ModalScreen[None]):
 
 
 class OmaStoreApp(App[None]):
-    TITLE = "omastore"
-    SUB_TITLE = "omarchy store"
+    TITLE = "Omastore"
+    SUB_TITLE = ""
     CSS_PATH = "app.tcss"
     BINDINGS = [
         Binding("slash", "focus_search", "Search", show=True),
@@ -173,6 +195,10 @@ class OmaStoreApp(App[None]):
         Binding("2", "set_tab('plugins')", "Plugins", show=True),
         Binding("3", "set_tab('installed')", "Installed", show=True),
         Binding("i", "do_install", "Install", show=True),
+        Binding("t", "try_theme", "Try", show=True),
+        Binding("b", "revert_theme", "Back", show=True),
+        Binding("o", "open_repo", "Repo", show=True),
+        Binding("c", "open_catalog", "Catalog", show=True),
         Binding("a", "do_apply", "Apply", show=True),
         Binding("e", "do_enable", "Enable", show=False),
         Binding("d", "do_disable", "Disable", show=False),
@@ -198,16 +224,19 @@ class OmaStoreApp(App[None]):
         self.selected: Item | None = None
         self.status_text = "loading catalogs…"
         self._readme_key = ""
+        self._highlighted_at = 0.0
+        self._about_timer = None
+        self._pending_about_key = ""
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("omastore  ·  the omarchy store", id="brand"),
+            Static("Omastore  ·  a client for their catalogs", id="brand"),
             Horizontal(
                 Static("themes", id="tab-themes", classes="tab active"),
                 Static("plugins", id="tab-plugins", classes="tab"),
                 Static("installed", id="tab-installed", classes="tab"),
                 Input(
-                    placeholder="search  ·  hue:blue  tag:bar  is:available",
+                    placeholder="Search",
                     id="search",
                     value=self.search,
                 ),
@@ -218,7 +247,7 @@ class OmaStoreApp(App[None]):
         )
         yield Horizontal(
             OptionList(id="list"),
-            Vertical(
+            VerticalScroll(
                 Static(id="meta"),
                 Static(id="palette"),
                 Markdown(id="readme"),
@@ -231,6 +260,8 @@ class OmaStoreApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.stylesheet.add_source(omarchy_theme_css())
+        self.refresh_css()
         self.tab = self.start_tab
         self._paint_tabs()
         if self.search:
@@ -285,6 +316,38 @@ class OmaStoreApp(App[None]):
     def action_do_install(self) -> None:
         self._act("install")
 
+    def action_try_theme(self) -> None:
+        item = self.selected
+        if item is None or item.kind != "theme":
+            return
+        from omastore.preview import remember_and_apply
+
+        result = remember_and_apply(item.name)
+        self.notify(str(result.get("message") or "try"))
+        self.load_items()
+
+    def action_revert_theme(self) -> None:
+        from omastore.preview import revert
+
+        result = revert()
+        self.notify(str(result.get("message") or "revert"))
+        self.load_items()
+
+    def action_open_repo(self) -> None:
+        self._open_link("repo")
+
+    def action_open_catalog(self) -> None:
+        self._open_link("catalog")
+
+    def _open_link(self, target: str) -> None:
+        item = self.selected
+        if item is None:
+            return
+        from omastore.links import open_item
+
+        result = open_item(item, target)
+        self.notify(str(result.get("message") or target))
+
     def action_do_apply(self) -> None:
         self._act("apply")
 
@@ -315,10 +378,21 @@ class OmaStoreApp(App[None]):
     @on(OptionList.OptionHighlighted, "#list")
     def on_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         if event.option_id:
-            self._select_key(event.option_id)
+            self._highlighted_at = time.monotonic()
+            self._select_key(event.option_id, immediate=False)
 
     @on(OptionList.OptionSelected, "#list")
     def on_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_id:
+            self._select_key(event.option_id, immediate=True)
+        if not self._should_activate():
+            return
+        self._activate_selected()
+
+    def _should_activate(self) -> bool:
+        return time.monotonic() - self._highlighted_at >= 0.25
+
+    def _activate_selected(self) -> None:
         item = self.selected
         if item is None:
             return
@@ -353,34 +427,83 @@ class OmaStoreApp(App[None]):
     def _rebuild_list(self) -> None:
         previous = self.selected.key if self.selected else ""
         self.shown = apply_query(self.items, self._active_query(), self.tab)
-        options = [Option(list_prompt(item), id=item.key.replace(":", "__")) for item in self.shown]
         listing = self.query_one("#list", OptionList)
+        row_width = listing.size.width or 40
+        if row_width > 4:
+            row_width -= 3
+        options = [
+            Option(list_prompt(item, row_width), id=item.key.replace(":", "__"))
+            for item in self.shown
+        ]
         listing.clear_options()
         if options:
             listing.add_options(options)
             index = next((i for i, item in enumerate(self.shown) if item.key == previous), 0)
             listing.highlighted = index
-            self._select_key(self.shown[index].key.replace(":", "__"))
+            self._select_key(self.shown[index].key.replace(":", "__"), immediate=False)
         else:
             self.selected = None
+            self._cancel_about()
             self._render_detail(None)
         active = self._active_query()
         self.query_one("#filters", Static).update(
             f"filter  {active.label()}    [f] status  [v] source  [s] sort"
         )
+        extra = ""
+        try:
+            from omastore.preview import preview_status
+            from omastore.updates import outdated_items
+
+            preview = preview_status()
+            if preview.get("active"):
+                extra += f"  ·  trying {preview.get('current') or ''}  [b] back to {preview.get('previous')}"
+            n_old = len(outdated_items(self.items))
+            if n_old:
+                extra += f"  ·  {n_old} outdated"
+        except Exception:
+            extra = ""
         self.query_one("#status", Static).update(
-            f"{self.status_text}  ·  {len(self.shown)} shown"
+            f"{self.status_text}  ·  {len(self.shown)} shown{extra}"
         )
 
-    def _select_key(self, key: str) -> None:
+    def _select_key(self, key: str, *, immediate: bool = False) -> None:
         key = key.replace("__", ":", 1)
         item = next((row for row in self.shown if row.key == key), None)
         self.selected = item
-        self._render_detail(item)
-        if item and not item.readme:
-            self._load_readme(item.key)
+        self._render_detail(item, settled=immediate and bool(item and item.readme))
+        if item is None:
+            self._cancel_about()
+            return
+        if immediate:
+            self._show_about(item)
+        else:
+            self._schedule_about(item.key)
 
-    def _render_detail(self, item: Item | None) -> None:
+    def _cancel_about(self) -> None:
+        if self._about_timer is not None:
+            self._about_timer.stop()
+            self._about_timer = None
+        self._pending_about_key = ""
+
+    def _schedule_about(self, key: str) -> None:
+        self._cancel_about()
+        self._pending_about_key = key
+        self._about_timer = self.set_timer(0.35, self._settle_about)
+
+    def _settle_about(self) -> None:
+        self._about_timer = None
+        item = self.selected
+        if item is None or item.key != self._pending_about_key:
+            return
+        self._show_about(item)
+
+    def _show_about(self, item: Item) -> None:
+        if item.readme:
+            self._render_detail(item, settled=True)
+            return
+        self._load_readme(item.key)
+
+    def _render_detail(self, item: Item | None, *, settled: bool = False) -> None:
         meta = self.query_one("#meta", Static)
         palette = self.query_one("#palette", Static)
         readme = self.query_one("#readme", Markdown)
@@ -392,8 +515,13 @@ class OmaStoreApp(App[None]):
         actions = []
         if item.can_install:
             actions.append("[i] install")
+        if item.kind == "theme":
+            actions.append("[t] try")
+            actions.append("[b] back")
         if item.can_apply:
             actions.append("[a] apply")
+        actions.append("[o] repo")
+        actions.append("[c] catalog")
         if item.can_enable:
             actions.append("[e] enable")
         if item.can_disable:
@@ -404,14 +532,22 @@ class OmaStoreApp(App[None]):
             actions.append("[x] remove")
         header = Text()
         header.append(item.name, style="bold")
-        header.append("\n")
-        header.append(item.status_label or item.kind, style="dim")
+        header.append("\n\n")
+        subtitle = "  ·  ".join(
+            part
+            for part in (item.kind, item.author, item.status_label)
+            if part
+        )
+        header.append(subtitle or item.kind, style="dim")
         if actions:
-            header.append("\n")
-            header.append("   ".join(actions), style="green")
+            header.append("\n\n")
+            header.append("    ".join(actions), style="bold")
         meta.update(header)
         palette.update(palette_text(item.colors) if item.colors else Text(""))
-        readme.update(item_markdown(item))
+        if settled and item.readme:
+            readme.update(item_markdown(item, item.readme, include_readme=True))
+        else:
+            readme.update(item_markdown(item, include_readme=False, loading=True))
 
     @work(thread=True, exclusive=True, group="readme")
     def _load_readme(self, key: str) -> None:
@@ -427,7 +563,7 @@ class OmaStoreApp(App[None]):
             return
         item.readme = text
         if self.selected and self.selected.key == key:
-            self.query_one("#readme", Markdown).update(item_markdown(item, text))
+            self._render_detail(item, settled=True)
 
     def _status(self) -> None:
         self.query_one("#status", Static).update(self.status_text)

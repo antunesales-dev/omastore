@@ -1,0 +1,8 @@
+post_install() {
+  echo "omastore is a client for the limehawk and HANCORE catalogs, not official Omarchy."
+  echo 'Run `omastore desktop` so it appears next to Omacalc in the app launcher.'
+}
+
+post_upgrade() {
+  post_install
+}

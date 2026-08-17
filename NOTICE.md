@@ -1,7 +1,12 @@
 # Credits and third-party rights
 
-omastore is a terminal client. It does not own the catalogs it reads
-or the themes and plugins those catalogs list.
+omastore is a convenience client. It is not a competing store,
+not an official Omarchy product, and not a host for themes or
+plugins.
+
+The catalogs, the websites, and the community around them were
+built by others. omastore only reads what they already publish
+and runs the official install commands they already document.
 
 ## Catalogs
 
@@ -21,6 +26,9 @@ endorsement.
 The plugin marketplace credits [bjarneo](https://github.com/bjarneo)
 for interface inspiration and limehawk's theme site for marketplace
 structure.
+
+If either catalog owner asks for a change, a credit tweak, or for
+this client to stop using a feed, that request will be honored.
 
 ## Installed works
 
