@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -201,6 +203,7 @@ class OmaStoreApp(App[None]):
         self.selected: Item | None = None
         self.status_text = "loading catalogs…"
         self._readme_key = ""
+        self._highlighted_at = 0.0
 
     def compose(self) -> ComposeResult:
         yield Vertical(
@@ -320,10 +323,21 @@ class OmaStoreApp(App[None]):
     @on(OptionList.OptionHighlighted, "#list")
     def on_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         if event.option_id:
+            self._highlighted_at = time.monotonic()
             self._select_key(event.option_id)
 
     @on(OptionList.OptionSelected, "#list")
     def on_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_id:
+            self._select_key(event.option_id)
+        if not self._should_activate():
+            return
+        self._activate_selected()
+
+    def _should_activate(self) -> bool:
+        return time.monotonic() - self._highlighted_at >= 0.25
+
+    def _activate_selected(self) -> None:
         item = self.selected
         if item is None:
             return

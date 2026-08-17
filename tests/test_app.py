@@ -12,6 +12,18 @@ def test_sort_puts_current_first() -> None:
     assert [item.id for item in ordered] == ["b", "c", "a"]
 
 
+def test_click_does_not_activate_until_already_selected() -> None:
+    import time
+
+    from omastore.app import OmaStoreApp
+
+    app = OmaStoreApp()
+    app._highlighted_at = time.monotonic()
+    assert app._should_activate() is False
+    app._highlighted_at = time.monotonic() - 1
+    assert app._should_activate() is True
+
+
 def test_list_prompt_marks_verification() -> None:
     from omastore.app import list_prompt
 
