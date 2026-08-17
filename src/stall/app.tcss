@@ -1,0 +1,116 @@
+Screen {
+    background: #111111;
+    color: #e8e8e8;
+}
+
+Header {
+    background: #1a1a1a;
+    color: #7dcea0;
+    text-style: none;
+}
+
+Footer {
+    background: #1a1a1a;
+}
+
+#chrome {
+    height: auto;
+    padding: 0 1 0 1;
+    background: #1a1a1a;
+}
+
+#brand {
+    height: 1;
+    color: #7dcea0;
+    text-style: bold;
+}
+
+#tabs {
+    height: 1;
+    padding: 0 0 0 0;
+}
+
+.tab {
+    padding: 0 1;
+    color: #888888;
+}
+
+.tab.active {
+    color: #111111;
+    background: #7dcea0;
+    text-style: bold;
+}
+
+#search {
+    width: 1fr;
+    background: #161616;
+    border: none;
+    padding: 0 1;
+}
+
+#search:focus {
+    background: #1f1f1f;
+}
+
+#body {
+    height: 1fr;
+}
+
+#list {
+    width: 2fr;
+    min-width: 24;
+    border-right: tall #2a2a2a;
+    padding: 0 0;
+}
+
+#list:focus {
+    border-right: tall #7dcea0;
+}
+
+#detail {
+    width: 1fr;
+    padding: 0 1;
+}
+
+#meta {
+    height: auto;
+    padding: 1 1 0 1;
+}
+
+#palette {
+    height: auto;
+    padding: 0 1 1 1;
+}
+
+#readme {
+    height: 1fr;
+    padding: 0 1 1 1;
+}
+
+#status {
+    height: 1;
+    color: #888888;
+    padding: 0 1;
+    background: #1a1a1a;
+}
+
+.badge {
+    color: #7dcea0;
+}
+
+.muted {
+    color: #888888;
+}
+
+#warning {
+    color: #e0af68;
+}
+
+#confirm {
+    width: 60;
+    height: auto;
+    padding: 2 3;
+    background: #1a1a1a;
+    border: tall #7dcea0;
+    align: center middle;
+}

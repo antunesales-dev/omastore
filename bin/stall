@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L $SOURCE ]]; do
+  SOURCE="$(readlink -f "$SOURCE")"
+done
+ROOT="$(cd "$(dirname "$SOURCE")/.." && pwd)"
+if [[ -x $ROOT/.venv/bin/python ]]; then
+  exec "$ROOT/.venv/bin/python" -m stall "$@"
+fi
+exec python3 -m stall "$@"
