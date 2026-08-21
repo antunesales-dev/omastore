@@ -4,6 +4,7 @@ from omastore.app import (
     filter_bar,
     format_action_hints,
     item_markdown,
+    next_shot_zoom,
     palette_text,
     sort_items,
 )
@@ -128,6 +129,14 @@ def test_preview_binding_exists() -> None:
     assert any(binding.key == "p" and binding.action == "open_preview" for binding in OmaStoreApp.BINDINGS)
 
 
+def test_shot_zoom_steps() -> None:
+    assert next_shot_zoom(1.0, 1) == 1.5
+    assert next_shot_zoom(1.5, 1) == 2.0
+    assert next_shot_zoom(4.0, 1) == 4.0
+    assert next_shot_zoom(2.0, -1) == 1.5
+    assert next_shot_zoom(1.0, -1) == 1.0
+
+
 def test_shots_cache_starts_empty() -> None:
     from omastore.app import OmaStoreApp
 
@@ -174,8 +183,8 @@ def test_action_groups_split_do_and_open() -> None:
     )
     do, look = action_groups(item)
     assert "[t] try" in do
-    assert "[p] preview" in look
-    assert "[p] preview" not in do
+    assert "[p] zoom" in look
+    assert "[p] zoom" not in do
 
 
 def test_action_hints_wrap_onto_two_lines() -> None:
@@ -189,7 +198,7 @@ def test_action_hints_wrap_onto_two_lines() -> None:
     )
     hints = action_hints(item)
     assert "[t] try" in hints
-    assert "[p] preview" in hints
+    assert "[p] zoom" in hints
     packed = format_action_hints(hints, width=40)
     assert "\n" in packed
     lines = packed.split("\n")
@@ -234,4 +243,4 @@ def test_render_detail_hides_empty_shots() -> None:
     assert stubs["#shot"].display is True
 
     meta = stubs["#meta"].value
-    assert "[p] preview" in (meta.plain if isinstance(meta, Text) else str(meta))
+    assert "[p] zoom" in (meta.plain if isinstance(meta, Text) else str(meta))

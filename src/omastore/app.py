@@ -5,8 +5,8 @@ import time
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.events import Click
+from textual.containers import Horizontal, ScrollableContainer, Vertical, VerticalScroll
+from textual.events import Click, MouseScrollDown, MouseScrollUp
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Markdown, OptionList, Static
 from textual.widgets.option_list import Option
@@ -106,7 +106,7 @@ def action_groups(item: Item) -> tuple[list[str], list[str]]:
         do.append("[u] update")
     if item.can_remove:
         do.append("[x] remove")
-    look = ["[o] repo", "[c] catalog", "[p] preview"]
+    look = ["[o] repo", "[c] catalog", "[p] zoom"]
     return do, look
 
 
@@ -226,6 +226,22 @@ def item_markdown(
     return "\n".join(bits)
 
 
+SHOT_ZOOMS = (1.0, 1.5, 2.0, 3.0, 4.0)
+
+
+def next_shot_zoom(current: float, direction: int) -> float:
+    """direction > 0 zooms in, < 0 zooms out. Clamped to SHOT_ZOOMS."""
+    if direction > 0:
+        for step in SHOT_ZOOMS:
+            if step > current + 0.01:
+                return step
+        return SHOT_ZOOMS[-1]
+    for step in reversed(SHOT_ZOOMS):
+        if step < current - 0.01:
+            return step
+    return SHOT_ZOOMS[0]
+
+
 class ConfirmScreen(ModalScreen[bool]):
     BINDINGS = [
         Binding("y,enter", "yes", "Yes", show=False),
@@ -244,6 +260,89 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def action_no(self) -> None:
         self.dismiss(False)
+
+
+class ShotScreen(ModalScreen[None]):
+    BINDINGS = [
+        Binding("escape,q", "close", "Close", show=True),
+        Binding("plus,equal", "zoom_in", "Zoom+", show=True),
+        Binding("minus", "zoom_out", "Zoom−", show=True),
+        Binding("0", "zoom_fit", "Fit", show=True),
+        Binding("o,p", "open_file", "Open", show=True),
+    ]
+
+    def __init__(self, path: str, title: str = "") -> None:
+        super().__init__()
+        self.path = path
+        self.shot_title = title
+        self.zoom = 1.0
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static(self._bar(), id="shot-bar"),
+            ScrollableContainer(ShotImage(self.path, id="shot-full"), id="shot-scroll"),
+            id="shot-modal",
+        )
+
+    def on_mount(self) -> None:
+        self._apply_zoom()
+
+    def _bar(self) -> str:
+        name = self.shot_title or "preview"
+        return f"{name}  ·  {self.zoom:g}×    + in   − out   0 fit   o file   esc close"
+
+    def _apply_zoom(self) -> None:
+        image = self.query_one("#shot-full", ShotImage)
+        box = self.query_one("#shot-scroll")
+        width = box.size.width or 80
+        height = box.size.height or 24
+        if self.zoom <= 1.0:
+            image.styles.width = "1fr"
+            image.styles.height = "1fr"
+        else:
+            image.styles.width = max(8, int(width * self.zoom))
+            image.styles.height = max(4, int(height * self.zoom))
+        self.query_one("#shot-bar", Static).update(self._bar())
+
+    def action_zoom_in(self) -> None:
+        self.zoom = next_shot_zoom(self.zoom, 1)
+        self._apply_zoom()
+
+    def action_zoom_out(self) -> None:
+        self.zoom = next_shot_zoom(self.zoom, -1)
+        self._apply_zoom()
+
+    def action_zoom_fit(self) -> None:
+        self.zoom = 1.0
+        self._apply_zoom()
+
+    def action_open_file(self) -> None:
+        from omastore.previews import _xdg_open
+
+        try:
+            _xdg_open(f"file://{self.path}")
+            self.notify(f"opened {self.path}")
+        except Exception as exc:
+            self.notify(str(exc), severity="error")
+
+    def action_close(self) -> None:
+        self.dismiss()
+
+    def on_click(self, event: Click) -> None:
+        if event.widget is not None and event.widget.id == "shot-full":
+            if self.zoom < 2.0:
+                self.action_zoom_in()
+            else:
+                self.action_zoom_fit()
+            event.stop()
+
+    def on_mouse_scroll_up(self, event: MouseScrollUp) -> None:
+        self.action_zoom_in()
+        event.stop()
+
+    def on_mouse_scroll_down(self, event: MouseScrollDown) -> None:
+        self.action_zoom_out()
+        event.stop()
 
 
 class CreditsScreen(ModalScreen[None]):
@@ -435,13 +534,28 @@ class OmaStoreApp(App[None]):
         self._open_link("catalog")
 
     def action_open_preview(self) -> None:
+        self._show_shot()
+
+    @on(Click, "#shot")
+    def _click_shot(self) -> None:
+        self._show_shot()
+
+    def _show_shot(self) -> None:
         item = self.selected
         if item is None:
             return
-        from omastore.previews import open_preview
+        path = self._shots.get(item.key) or ""
+        if not path:
+            from omastore.previews import resolve_preview_path
 
-        result = open_preview(item)
-        self.notify(str(result.get("message") or "preview"))
+            found = resolve_preview_path(item)
+            path = str(found) if found else ""
+            if path:
+                self._shots[item.key] = path
+        if not path:
+            self.notify("no preview image")
+            return
+        self.push_screen(ShotScreen(path, item.name))
 
     def _open_link(self, target: str) -> None:
         item = self.selected

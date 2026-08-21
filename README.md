@@ -15,7 +15,7 @@ Omastore  1 themes  2 plugins  3 installed     Search  ·  /
 
  ● Spacex
  ● Tokyo Night                              [t] try  [b] back  [a] apply
- ○ Lumon                              *164  [o] repo  [c] catalog  [p] preview
+ ○ Lumon                              *164  [o] repo  [c] catalog  [p] zoom
 ```
 
 Not affiliated with Omarchy, 37signals, or the community catalog sites. Those sites stay the galleries. omastore is a terminal client for the same catalogs.
@@ -113,7 +113,7 @@ omastore about
 | `i` | install |
 | `t` / `b` | try an installed theme (does not freeze the list) / restore the previous one |
 | `o` / `c` | open the author repo / catalog site |
-| `p` | open a catalog or repo screenshot |
+| `p` | enlarge the screenshot (click it; `+`/`−` zoom, `o` opens the file) |
 | `a` | apply theme |
 | `e` / `d` | enable / disable plugin |
 | `u` | update |

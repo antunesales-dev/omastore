@@ -91,11 +91,11 @@ Screen {{
     color: {c["foreground"]};
 }}
 
-Header, Footer, #chrome, #status, #credits-line {{
+Header, Footer, #chrome, #status, #credits-line, #shot-bar, #shot-modal {{
     background: {c["darker_background"]};
 }}
 
-#brand {{
+#brand, #shot-bar {{
     color: {c["accent"]};
 }}
 
