@@ -139,6 +139,27 @@ def test_install_without_yes_returns_2(monkeypatch, capsys) -> None:
     assert "pass --yes to proceed" in out
 
 
+def test_remove_without_yes_warns_hidden_widgets(monkeypatch, capsys) -> None:
+    item = _item(id="groups.plugin", name="Groups", installed=True)
+    monkeypatch.setattr("omastore.cli._load", lambda force=False: ([item], object()))
+    monkeypatch.setattr("omastore.cli._find", lambda items, token: item)
+    monkeypatch.setattr(
+        "omastore.local.layout_remove_warnings",
+        lambda plugin_id, *, path=None: [
+            "These widgets are hidden inside this plugin. They will be put back on the bar first: omarchy.clock"
+        ],
+    )
+    called: list[object] = []
+    monkeypatch.setattr("omastore.cli.remove", lambda *a, **k: called.append(item) or _Result())
+    args = build_parser().parse_args(["remove", "plugin:groups.plugin"])
+    assert args.func(args) == 2
+    assert called == []
+    out = capsys.readouterr().out
+    assert "They will be put back on the bar first" in out
+    assert "omarchy.clock" in out
+    assert "pass --yes to proceed" in out
+
+
 def test_install_with_yes_calls_install(monkeypatch, capsys) -> None:
     item = _item(
         id="foo",

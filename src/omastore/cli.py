@@ -159,6 +159,11 @@ def _act(args: argparse.Namespace, name: str) -> int:
             print(item.verification_label)
         for warning in item.warnings:
             print(warning)
+        if name == "remove" and item.kind == "plugin":
+            from omastore.local import layout_remove_warnings
+
+            for warning in layout_remove_warnings(item.id):
+                print(warning)
         print("pass --yes to proceed")
         return 2
     runners = {

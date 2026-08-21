@@ -235,16 +235,24 @@ def test_markdown_mentions_extra_details_not_required() -> None:
 
 def test_filter_bar_is_readable() -> None:
     assert "is:all" not in filter_bar(Query())
-    assert "stars" in filter_bar(Query())
-    assert "0 reset" in filter_bar(Query())
+    themes = filter_bar(Query())
+    assert "f all" in themes
+    assert "v all" in themes
+    assert "s sort:stars" in themes
+    assert "0 reset" in themes
+    assert "y " not in themes
     bar = filter_bar(Query(status="installed", sort="name"))
-    assert "installed" in bar
-    assert "name" in bar
+    assert "f installed" in bar
+    assert "s sort:name" in bar
     plugins = filter_bar(Query(), "plugins")
+    assert "f all" in plugins
+    assert "y all" in plugins
     assert "0 reset" in plugins
-    assert " y " in plugins or plugins.endswith(" y") or "  y  " in plugins
-    not_installed = filter_bar(Query(status="not-installed"), "plugins")
-    assert "not installed" in not_installed
+    active = filter_bar(
+        Query(status="not-installed", source="community", verified="yes", sort="name"),
+        "plugins",
+    )
+    assert active == "f not-installed   v community   y verified   s sort:name   0 reset"
     assert "limehawk" not in filter_bar(Query())
     assert "HANCORE" not in filter_bar(Query(), "plugins")
 
@@ -366,6 +374,25 @@ def test_confirm_prompt_covers_install_enable_and_warnings() -> None:
     assert "official omarchy command" not in enable
 
 
+def test_confirm_remove_warns_hidden_bar_widgets(monkeypatch) -> None:
+    from omastore.app import confirm_prompt
+    from omastore.models import Item
+
+    monkeypatch.setattr(
+        "omastore.local.layout_remove_warnings",
+        lambda plugin_id, *, path=None: [
+            "These widgets are hidden inside this plugin. They will be put back on the bar first: omarchy.clock, omarchy.audio"
+        ],
+    )
+    item = Item(kind="plugin", id="groups.plugin", name="Groups", installed=True)
+    prompt = confirm_prompt("remove", item)
+    assert "warnings:" in prompt
+    assert "They will be put back on the bar first" in prompt
+    assert "omarchy.clock" in prompt
+    install = confirm_prompt("install", item)
+    assert "hidden inside this plugin" not in install
+
+
 def test_theme_update_confirm_covers_all_extra_git_themes() -> None:
     item = Item(kind="theme", id="lumon", name="Lumon", extra=True, install_url="https://github.com/x/lumon")
     prompt = confirm_prompt("update", item)
@@ -459,7 +486,7 @@ def test_reset_filters_clears_cycles_and_prefixes() -> None:
     assert app.filters.status == "all"
     assert app.filters.source == "all"
     assert app.filters.verified == "all"
-    assert app.filters.sort == "stars"
+    assert app.filters.sort == "name"
     assert app.filters.min_stars == 0
     assert rebuilt == ["rebuild"]
 

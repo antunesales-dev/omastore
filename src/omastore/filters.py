@@ -110,9 +110,10 @@ def clamp_query(query: Query, tab: Tab) -> Query:
 
 
 def reset_filters(query: Query | None = None) -> Query:
-    """Drop status/source/verified/stars filters. Keep free-text search."""
-    text = query.text if query is not None else ""
-    return Query(text=text)
+    """Drop status/source/verified/min-stars. Keep search text and sort."""
+    if query is None:
+        return Query()
+    return Query(text=query.text, sort=query.sort or "stars")
 
 
 def strip_filter_tokens(raw: str) -> str:
