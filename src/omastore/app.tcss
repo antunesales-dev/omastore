@@ -191,3 +191,12 @@ Footer {
     border: tall #7dcea0;
     align: center middle;
 }
+
+#notice {
+    width: 64;
+    height: auto;
+    padding: 2 3;
+    background: #1a1a1a;
+    border: tall #7dcea0;
+    align: center middle;
+}

@@ -32,10 +32,11 @@ def _find(items: list[Item], token: str) -> Item:
     return item
 
 
-def _print_item(item: Item, *, verbose: bool = False) -> None:
+def _print_item(item: Item, *, verbose: bool = False, mark: str = "") -> None:
     stars = f" ★{item.stars}" if item.stars is not None else ""
     status = f"  [{item.status_label}]" if item.status_label else ""
-    print(f"{item.kind:7}  {item.name}{stars}{status}")
+    prefix = f"{mark} " if mark else ""
+    print(f"{item.kind:7}  {prefix}{item.name}{stars}{status}")
     print(f"         {item.key}")
     if item.author:
         print(f"         by {item.author}")
@@ -83,6 +84,10 @@ def _query_from_args(args: argparse.Namespace, text: str = "") -> Query:
         query = query.with_sort(args.sort)
     if getattr(args, "verified", False):
         query = Query(**{**query.__dict__, "verified": "yes"})
+    if getattr(args, "builtin", False):
+        query = query.with_source("builtin")
+    if getattr(args, "stars", None):
+        query = Query(**{**query.__dict__, "min_stars": max(0, int(args.stars))})
     return query
 
 
@@ -95,6 +100,8 @@ def _add_filter_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tag", help="plugin or theme tag")
     parser.add_argument("--source", choices=("community", "builtin"))
     parser.add_argument("--verified", action="store_true")
+    parser.add_argument("--builtin", action="store_true", help="built-in / stock plugins")
+    parser.add_argument("--stars", type=int, help="minimum star rating")
     parser.add_argument("--sort", choices=("stars", "name", "recent"), default="stars")
 
 
@@ -251,6 +258,108 @@ def cmd_preview(args: argparse.Namespace) -> int:
     return 0 if result.get("ok") else 1
 
 
+def cmd_packs(args: argparse.Namespace) -> int:
+    from omastore.packs import PACK_CREDIT, PACKS
+
+    items, _ = _load(force=args.refresh)
+    print(PACK_CREDIT)
+    print()
+    for pack in PACKS:
+        listed, pending = pack.counts(items)
+        installed = sum(1 for item in pack.members(items) if item.installed)
+        print(f"{pack.id:10}  {pack.title}")
+        print(f"            {pack.blurb}")
+        print(f"            {listed} listed  ·  {installed} installed  ·  {pending} to install")
+        print()
+    return 0
+
+
+def cmd_pack_show(args: argparse.Namespace, pack_id: str) -> int:
+    from omastore.packs import PACK_CREDIT, get_pack
+
+    pack = get_pack(pack_id)
+    if pack is None:
+        print(f"unknown pack {pack_id!r}. Try: omastore packs")
+        return 1
+    items, _ = _load(force=args.refresh)
+    members = pack.listed(items)
+    listed, pending = pack.counts(items)
+    installed = sum(1 for item in members if item.installed)
+    print(f"{pack.id:10}  {pack.title}")
+    print(f"            {pack.blurb}")
+    print(f"            {listed} listed  ·  {installed} installed  ·  {pending} to install")
+    print(f"            {PACK_CREDIT}")
+    print()
+    if not members:
+        print("no verified plugins matched")
+        return 1
+    for item in members:
+        _print_item(item, mark="●" if item.installed else "○")
+        print()
+    return 0
+
+
+def cmd_pack_install(args: argparse.Namespace, pack_id: str) -> int:
+    from omastore.actions import install_pack
+    from omastore.packs import describe_pack_install, get_pack
+
+    pack = get_pack(pack_id)
+    if pack is None:
+        print(f"unknown pack {pack_id!r}. Try: omastore packs")
+        return 1
+    items, _ = _load(force=args.refresh)
+    pending = pack.pending(items)
+    if not pending:
+        print("nothing to install")
+        return 0
+    if not args.yes and not args.dry_run:
+        print(describe_pack_install(pack, pending))
+        print("pass --yes to proceed")
+        return 2
+    failed = False
+    for item, result in install_pack(pending, dry_run=args.dry_run):
+        print(f"{item.key}: {result.message}")
+        if not result.ok:
+            failed = True
+    return 1 if failed else 0
+
+
+def cmd_pack_remove(args: argparse.Namespace, pack_id: str) -> int:
+    from omastore.actions import remove_pack
+    from omastore.packs import describe_pack_remove, get_pack
+
+    pack = get_pack(pack_id)
+    if pack is None:
+        print(f"unknown pack {pack_id!r}. Try: omastore packs")
+        return 1
+    items, _ = _load(force=args.refresh)
+    rows = pack.removable(items)
+    if not rows:
+        print("nothing to remove")
+        return 0
+    if not args.yes and not args.dry_run:
+        print(describe_pack_remove(pack, rows))
+        print("pass --yes to proceed")
+        return 2
+    failed = False
+    for item, result in remove_pack(rows, dry_run=args.dry_run):
+        print(f"{item.key}: {result.message}")
+        if not result.ok:
+            failed = True
+    return 1 if failed else 0
+
+
+def cmd_pack(args: argparse.Namespace) -> int:
+    if args.target in {"install", "remove", "uninstall"}:
+        if not args.id:
+            print(f"usage: omastore pack {args.target} <pack>")
+            return 2
+        if args.target == "install":
+            return cmd_pack_install(args, args.id)
+        return cmd_pack_remove(args, args.id)
+    return cmd_pack_show(args, args.target)
+
+
 def cmd_tui(args: argparse.Namespace) -> int:
     from omastore.app import run_tui
 
@@ -272,7 +381,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     tui = sub.add_parser("tui", help="open the store TUI (default)")
     tui.add_argument("query", nargs="*", help="optional initial search")
-    tui.add_argument("--tab", choices=("themes", "plugins", "installed"), default="themes")
+    tui.add_argument("--tab", choices=("themes", "plugins", "installed", "packs"), default="themes")
     tui.set_defaults(func=cmd_tui)
 
     for tab in ("themes", "plugins", "installed"):
@@ -334,6 +443,14 @@ def build_parser() -> argparse.ArgumentParser:
     preview_cmd = sub.add_parser("preview", help="open a catalog or repo screenshot")
     preview_cmd.add_argument("id")
     preview_cmd.set_defaults(func=cmd_preview)
+
+    packs = sub.add_parser("packs", help="list suggested plugin packs from the HANCORE catalog")
+    packs.set_defaults(func=cmd_packs)
+
+    pack = sub.add_parser("pack", help="show, install, or remove a suggested plugin pack")
+    pack.add_argument("target", help="pack id, or install/remove")
+    pack.add_argument("id", nargs="?", help="pack id when using install or remove")
+    pack.set_defaults(func=cmd_pack)
     return parser
 
 

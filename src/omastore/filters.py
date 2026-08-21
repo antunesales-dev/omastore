@@ -6,7 +6,9 @@ from datetime import datetime
 from omastore.models import Item, Tab
 
 STATUS_CYCLE = ("all", "installed", "available", "extra", "stock", "current", "outdated")
+PLUGIN_STATUS_CYCLE = ("all", "installed", "not-installed")
 SOURCE_CYCLE = ("all", "community", "builtin")
+VERIFIED_CYCLE = ("all", "yes", "no")
 SORT_CYCLE = ("stars", "name", "recent")
 PREFIXES = {
     "is": "status",
@@ -19,6 +21,7 @@ PREFIXES = {
     "kind": "kind",
     "verified": "verified",
     "sort": "sort",
+    "stars": "stars",
 }
 
 
@@ -33,6 +36,7 @@ class Query:
     kind: str = "all"
     verified: str = "all"
     sort: str = "stars"
+    min_stars: int = 0
 
     def with_status(self, status: str) -> Query:
         return replace(self, status=status)
@@ -42,6 +46,9 @@ class Query:
 
     def with_sort(self, sort: str) -> Query:
         return replace(self, sort=sort)
+
+    def with_verified(self, verified: str) -> Query:
+        return replace(self, verified=verified)
 
     def label(self) -> str:
         parts = [f"is:{self.status}"]
@@ -55,6 +62,8 @@ class Query:
             parts.append(f"tag:{self.tag}")
         if self.verified != "all":
             parts.append(f"verified:{self.verified}")
+        if self.min_stars:
+            parts.append(f"stars:{self.min_stars}")
         parts.append(f"sort:{self.sort}")
         if self.text:
             parts.insert(0, self.text)
@@ -67,16 +76,37 @@ def _next(cycle: tuple[str, ...], current: str) -> str:
     return cycle[(cycle.index(current) + 1) % len(cycle)]
 
 
-def cycle_status(query: Query) -> Query:
-    return query.with_status(_next(STATUS_CYCLE, query.status))
+def status_cycle_for(tab: Tab) -> tuple[str, ...]:
+    if tab == "plugins":
+        return PLUGIN_STATUS_CYCLE
+    return STATUS_CYCLE
+
+
+def cycle_status(query: Query, tab: Tab = "themes") -> Query:
+    cycle = status_cycle_for(tab)
+    current = query.status if query.status in cycle else "all"
+    return query.with_status(_next(cycle, current))
 
 
 def cycle_source(query: Query) -> Query:
     return query.with_source(_next(SOURCE_CYCLE, query.source))
 
 
+def cycle_verified(query: Query) -> Query:
+    current = query.verified if query.verified in VERIFIED_CYCLE else "all"
+    return query.with_verified(_next(VERIFIED_CYCLE, current))
+
+
 def cycle_sort(query: Query) -> Query:
     return query.with_sort(_next(SORT_CYCLE, query.sort))
+
+
+def clamp_query(query: Query, tab: Tab) -> Query:
+    cycle = status_cycle_for(tab)
+    status = query.status if query.status in cycle else "all"
+    if status == "available" and tab == "plugins":
+        status = "not-installed"
+    return replace(query, status=status)
 
 
 def parse_search(raw: str, *, defaults: Query | None = None) -> Query:
@@ -108,6 +138,11 @@ def parse_search(raw: str, *, defaults: Query | None = None) -> Query:
             query = replace(query, verified=value)
         elif field == "sort":
             query = replace(query, sort=value)
+        elif field == "stars":
+            try:
+                query = replace(query, min_stars=max(0, int(value)))
+            except ValueError:
+                text_parts.append(token)
     return replace(query, text=" ".join(text_parts))
 
 
@@ -126,11 +161,13 @@ def matches_filters(item: Item, query: Query) -> bool:
         return False
     if query.status == "installed" and not item.installed:
         return False
+    if query.status in {"not-installed", "uninstalled"} and item.installed:
+        return False
     if query.status == "available" and (item.installed or not item.can_install):
         return False
     if query.status == "extra" and not item.extra:
         return False
-    if query.status == "stock" and not (item.builtin and not item.extra):
+    if query.status == "stock" and not ((item.builtin or item.first_party) and not item.extra):
         return False
     if query.status == "current" and not item.current:
         return False
@@ -146,7 +183,11 @@ def matches_filters(item: Item, query: Query) -> bool:
         return False
     if query.verified == "yes" and not _verified(item):
         return False
-    if query.verified in {"no", "unverified"} and _verified(item):
+    if query.verified in {"no", "unverified"} and (
+        _verified(item) or item.first_party or item.builtin
+    ):
+        return False
+    if query.min_stars and (item.stars or 0) < query.min_stars:
         return False
     if query.text and not item.matches(query.text):
         return False
@@ -158,6 +199,8 @@ def for_tab(items: list[Item], tab: Tab) -> list[Item]:
         return [item for item in items if item.kind == "theme"]
     if tab == "plugins":
         return [item for item in items if item.kind == "plugin"]
+    if tab == "packs":
+        return []
     return [item for item in items if item.installed or item.current]
 
 
@@ -172,6 +215,9 @@ def _stamp(value: str) -> float:
 
 def sort_key(item: Item, sort: str, tab: Tab) -> tuple:
     if tab == "plugins":
+        if sort == "stars":
+            stars = item.stars if item.stars is not None else -1
+            return (-stars, item.name.lower(), item.id.lower())
         group = 0 if item.installed else 1
         if sort == "name":
             return (group, item.name.lower(), item.id.lower())

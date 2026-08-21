@@ -1,4 +1,12 @@
-from omastore.filters import Query, apply_query, cycle_status, matches_filters, parse_search
+from omastore.filters import (
+    Query,
+    apply_query,
+    clamp_query,
+    cycle_status,
+    cycle_verified,
+    matches_filters,
+    parse_search,
+)
 from omastore.models import Item
 
 
@@ -52,6 +60,65 @@ def test_cycle_status() -> None:
     assert query.status == "installed"
 
 
+def test_plugin_status_cycle_skips_theme_only_states() -> None:
+    query = cycle_status(Query(), "plugins")
+    assert query.status == "installed"
+    query = cycle_status(query, "plugins")
+    assert query.status == "not-installed"
+    query = cycle_status(query, "plugins")
+    assert query.status == "all"
+    extra = cycle_status(Query(status="extra"), "plugins")
+    assert extra.status == "installed"
+
+
+def test_plugin_not_installed_and_verified_and_builtin() -> None:
+    have = Item(kind="plugin", id="have", name="Have", installed=True, verification="verified")
+    open_ = Item(
+        kind="plugin",
+        id="open",
+        name="Open",
+        verification="unverified",
+        install_url="https://github.com/a/open",
+    )
+    stock = Item(kind="plugin", id="clock", name="Clock", first_party=True, builtin=True, installed=True)
+    items = [have, open_, stock]
+    installed = apply_query(items, Query(status="installed", sort="name"), "plugins")
+    assert [item.id for item in installed] == ["clock", "have"]
+    missing = apply_query(items, Query(status="not-installed", sort="name"), "plugins")
+    assert [item.id for item in missing] == ["open"]
+    verified = apply_query(items, Query(verified="yes", sort="name"), "plugins")
+    assert [item.id for item in verified] == ["have"]
+    unverified = apply_query(items, Query(verified="no", sort="name"), "plugins")
+    assert [item.id for item in unverified] == ["open"]
+    builtin = apply_query(items, Query(source="builtin", sort="name"), "plugins")
+    assert [item.id for item in builtin] == ["clock"]
+    community = apply_query(items, Query(source="community", sort="name"), "plugins")
+    assert [item.id for item in community] == ["have", "open"]
+
+
+def test_stars_prefix_and_min_stars() -> None:
+    query = parse_search("stars:10")
+    assert query.min_stars == 10
+    low = Item(kind="plugin", id="low", name="Low", stars=2)
+    high = Item(kind="plugin", id="high", name="High", stars=40)
+    shown = apply_query([low, high], Query(min_stars=10), "plugins")
+    assert [item.id for item in shown] == ["high"]
+
+
+def test_cycle_verified() -> None:
+    query = cycle_verified(Query())
+    assert query.verified == "yes"
+    query = cycle_verified(query)
+    assert query.verified == "no"
+    query = cycle_verified(query)
+    assert query.verified == "all"
+
+
+def test_clamp_query_drops_theme_status_on_plugins() -> None:
+    query = clamp_query(Query(status="current"), "plugins")
+    assert query.status == "all"
+
+
 def test_themes_sort_installed_before_catalog() -> None:
     items = [
         _theme(id="void", name="Void", stars=999),
@@ -70,8 +137,16 @@ def test_plugins_sort_installed_then_az() -> None:
         Item(kind="plugin", id="a", name="Alpha", installed=False),
         Item(kind="plugin", id="c", name="Clock", installed=True),
     ]
-    shown = apply_query(items, Query(), "plugins")
+    shown = apply_query(items, Query(sort="name"), "plugins")
     assert [item.name for item in shown] == ["Beta", "Clock", "Alpha", "Zebra"]
+
+
+def test_packs_tab_lists_no_items() -> None:
+    items = [
+        Item(kind="plugin", id="clock", name="Clock", first_party=True),
+        _theme(id="void", name="Void"),
+    ]
+    assert apply_query(items, Query(), "packs") == []
 
 
 def test_plugins_sort_stars_among_uninstalled() -> None:
@@ -82,4 +157,4 @@ def test_plugins_sort_stars_among_uninstalled() -> None:
         Item(kind="plugin", id="on", name="On", stars=1, installed=True),
     ]
     shown = apply_query(items, Query(sort="stars"), "plugins")
-    assert [item.name for item in shown] == ["On", "High", "Mid", "Low"]
+    assert [item.name for item in shown] == ["High", "Mid", "Low", "On"]

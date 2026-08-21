@@ -9,3 +9,5 @@ def test_about_names_catalog_authors() -> None:
     assert "does not host" in ABOUT or "not a competing store" in ABOUT.lower()
     assert "not a competing store" in ABOUT.lower()
     assert OMASTORE_REPO in ABOUT
+    assert "HANCORE" in ABOUT
+    assert "suggested" in ABOUT.lower() or "packs" in ABOUT.lower()

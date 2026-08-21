@@ -47,6 +47,32 @@ def _operand(value: object, *, error: str) -> str | ActionResult:
     return text
 
 
+def install_pack(items: list[Item], *, dry_run: bool = False) -> list[tuple[Item, ActionResult]]:
+    """Install pending pack members one by one. Stop on the first failure."""
+    results: list[tuple[Item, ActionResult]] = []
+    for item in items:
+        if not item.can_install:
+            continue
+        result = install(item, dry_run=dry_run)
+        results.append((item, result))
+        if not result.ok:
+            break
+    return results
+
+
+def remove_pack(items: list[Item], *, dry_run: bool = False) -> list[tuple[Item, ActionResult]]:
+    """Remove installed pack members one by one. Stop on the first failure."""
+    results: list[tuple[Item, ActionResult]] = []
+    for item in items:
+        if not item.can_remove:
+            continue
+        result = remove(item, dry_run=dry_run)
+        results.append((item, result))
+        if not result.ok:
+            break
+    return results
+
+
 def install(item: Item, *, dry_run: bool = False) -> ActionResult:
     if not item.install_url:
         return ActionResult(False, [], "", f"{item.name} has no install URL")
