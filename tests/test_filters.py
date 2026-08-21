@@ -58,8 +58,12 @@ def test_outdated_filter() -> None:
 
 
 def test_cycle_status() -> None:
+    from omastore.filters import STATUS_CYCLE
+
     query = cycle_status(Query())
     assert query.status == "installed"
+    assert "current" not in STATUS_CYCLE
+    assert "outdated" not in STATUS_CYCLE
 
 
 def test_plugin_status_cycle_skips_theme_only_states() -> None:

@@ -552,7 +552,7 @@ class OmaStoreApp(App[None]):
     CSS_PATH = "app.tcss"
     BINDINGS = [
         Binding("slash", "focus_search", "Search", show=True),
-        Binding("escape", "blur_or_reset", "List", show=False),
+        Binding("escape", "blur_search", "List", show=False),
         Binding("0", "reset_filters", "Reset", show=False),
         Binding("1", "set_tab('themes')", "Themes", show=False),
         Binding("2", "set_tab('plugins')", "Plugins", show=False),
@@ -665,21 +665,58 @@ class OmaStoreApp(App[None]):
     def action_blur_search(self) -> None:
         self.query_one("#list", OptionList).focus()
 
-    def action_blur_or_reset(self) -> None:
-        search = self.query_one("#search", Input)
-        if search.has_focus:
-            self.query_one("#list", OptionList).focus()
-            return
-        self.action_reset_filters()
+    def _search_focused(self) -> bool:
+        try:
+            return self.query_one("#search", Input).has_focus
+        except Exception:
+            return False
+
+    def _filters_dirty(self) -> bool:
+        query = self.filters
+        if query.status != "all" or query.source != "all" or query.verified != "all":
+            return True
+        if query.sort != "stars" or query.min_stars or query.hue != "all":
+            return True
+        if query.category != "all" or query.tag != "all":
+            return True
+        return self.search != strip_filter_tokens(self.search)
 
     def action_reset_filters(self) -> None:
+        if self._search_focused():
+            return
+        if not self._filters_dirty():
+            return
         self.search = strip_filter_tokens(self.search)
         self.filters = reset_filters(Query(text=self.search))
         box = self.query_one("#search", Input)
         if box.value != self.search:
-            box.value = self.search
+            with self.prevent(Input.Changed):
+                box.value = self.search
         self._rebuild_list()
-        self.notify("filters reset")
+
+    def action_cycle_status(self) -> None:
+        if self._search_focused() or self.tab == "packs":
+            return
+        self.filters = cycle_status(self.filters, self.tab)
+        self._rebuild_list()
+
+    def action_cycle_source(self) -> None:
+        if self._search_focused() or self.tab == "packs":
+            return
+        self.filters = cycle_source(self.filters)
+        self._rebuild_list()
+
+    def action_cycle_verified(self) -> None:
+        if self._search_focused() or self.tab != "plugins":
+            return
+        self.filters = cycle_verified(self.filters)
+        self._rebuild_list()
+
+    def action_cycle_sort(self) -> None:
+        if self._search_focused() or self.tab == "packs":
+            return
+        self.filters = cycle_sort(self.filters)
+        self._rebuild_list()
 
     def action_set_tab(self, tab: Tab) -> None:
         self.tab = tab
@@ -711,22 +748,6 @@ class OmaStoreApp(App[None]):
 
     def action_credits(self) -> None:
         self.push_screen(CreditsScreen())
-
-    def action_cycle_status(self) -> None:
-        self.filters = cycle_status(self.filters, self.tab)
-        self._rebuild_list()
-
-    def action_cycle_source(self) -> None:
-        self.filters = cycle_source(self.filters)
-        self._rebuild_list()
-
-    def action_cycle_verified(self) -> None:
-        self.filters = cycle_verified(self.filters)
-        self._rebuild_list()
-
-    def action_cycle_sort(self) -> None:
-        self.filters = cycle_sort(self.filters)
-        self._rebuild_list()
 
     def action_do_install(self) -> None:
         if self.tab == "packs":
