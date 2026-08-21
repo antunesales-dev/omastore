@@ -2,6 +2,7 @@ from pathlib import Path
 
 from omastore.models import Item
 from omastore.safety import (
+    allowed_fetch_url,
     allowed_install_url,
     contained_child,
     is_http_url,
@@ -32,6 +33,8 @@ def test_allowed_install_url_github_https_only() -> None:
     assert not allowed_install_url("http://github.com/a/b")
     assert not allowed_install_url("https://evil.example/a/b")
     assert not allowed_install_url("https://github.com/onlyone")
+    assert allowed_fetch_url("https://codeload.github.com/a/demo/tar.gz/refs/heads/main")
+    assert not allowed_install_url("https://codeload.github.com/a/demo/tar.gz/refs/heads/main")
 
 
 def test_contained_child_stays_under_root(tmp_path: Path) -> None:

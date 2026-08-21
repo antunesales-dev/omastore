@@ -9,6 +9,8 @@ NOTICE = (
     "Community plugins and themes run unsandboxed inside omarchy-shell.\n"
     "Listings come from limehawk (omarchytheme.com) and HANCORE "
     "(omarchyplugins.com). omastore does not approve what they publish.\n"
+    "Before install, omastore fetches a copy of the repo and scans it "
+    "without running it. That is not a sandbox and not proof of safety.\n"
     "Read the repo before you install."
 )
 

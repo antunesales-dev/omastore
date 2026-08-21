@@ -8,6 +8,7 @@ def test_notice_text_credits_catalogs() -> None:
     assert "unsandboxed" in notice.NOTICE.lower()
     assert "limehawk" in notice.NOTICE.lower()
     assert "HANCORE" in notice.NOTICE
+    assert "without running" in notice.NOTICE.lower() or "scans" in notice.NOTICE.lower()
 
 
 def test_seen_and_mark(monkeypatch, tmp_path: Path) -> None:
