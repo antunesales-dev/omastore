@@ -72,3 +72,14 @@ def test_plugins_sort_installed_then_az() -> None:
     ]
     shown = apply_query(items, Query(), "plugins")
     assert [item.name for item in shown] == ["Beta", "Clock", "Alpha", "Zebra"]
+
+
+def test_plugins_sort_stars_among_uninstalled() -> None:
+    items = [
+        Item(kind="plugin", id="low", name="Low", stars=2),
+        Item(kind="plugin", id="high", name="High", stars=40),
+        Item(kind="plugin", id="mid", name="Mid", stars=10),
+        Item(kind="plugin", id="on", name="On", stars=1, installed=True),
+    ]
+    shown = apply_query(items, Query(sort="stars"), "plugins")
+    assert [item.name for item in shown] == ["On", "High", "Mid", "Low"]

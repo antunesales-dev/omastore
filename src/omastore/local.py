@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from omastore.models import Item, slugify
+from omastore.safety import contained_child, theme_aliases
 
 
 def _home() -> Path:
@@ -54,15 +55,18 @@ def git_head(path: Path) -> str:
 def _existing_child(root: Path, name: str) -> Path | None:
     if not name:
         return None
-    direct = root / name
-    if direct.is_dir() or direct.is_symlink():
+    direct = contained_child(root, name)
+    if direct is not None and (direct.is_dir() or direct.is_symlink()):
         return direct
     if not root.is_dir():
         return None
     needle = name.lower()
     for entry in root.iterdir():
+        child = contained_child(root, entry.name)
+        if child is None:
+            continue
         if entry.name.lower() == needle and (entry.is_dir() or entry.is_symlink()):
-            return entry
+            return child
     return None
 
 
@@ -99,15 +103,21 @@ def plugin_preview_file(plugin_id: str) -> Path | None:
     return _preview_in(installed_plugin_path(plugin_id))
 
 
-def run_omarchy(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["omarchy", *args],
-        check=check,
-        text=True,
-        capture_output=True,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+def run_omarchy(*args: str, check: bool = False, timeout: float = 30) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            ["omarchy", *args],
+            check=check,
+            text=True,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        raise
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(["omarchy", *args], 1, "", "omarchy timed out")
 
 
 @dataclass
@@ -128,7 +138,15 @@ class LocalState:
 def _dir_slugs(path: Path) -> set[str]:
     if not path.is_dir():
         return set()
-    return {entry.name.lower() for entry in path.iterdir() if entry.is_dir() or entry.is_symlink()}
+    slugs: set[str] = set()
+    for entry in path.iterdir():
+        if not (entry.is_dir() or entry.is_symlink()):
+            continue
+        if contained_child(path, entry.name) is None:
+            continue
+        slugs.add(entry.name.lower())
+        slugs.add(slugify(entry.name))
+    return slugs
 
 
 def load_local() -> LocalState:
@@ -168,16 +186,21 @@ def load_local() -> LocalState:
 
 
 def overlay(items: list[Item], local: LocalState) -> list[Item]:
-    known_theme_slugs = {item.id for item in items if item.kind == "theme"}
+    known_theme_slugs: set[str] = set()
     known_plugin_ids = {item.id for item in items if item.kind == "plugin"}
+    local_slugs = set(local.theme_names) | local.extra_slugs | local.stock_slugs
     result: list[Item] = []
 
     for item in items:
         if item.kind == "theme":
-            item.installed = item.id in local.theme_names or item.id in local.extra_slugs or item.id in local.stock_slugs
-            item.current = item.id == local.current_slug
-            item.extra = item.id in local.extra_slugs
-            item.builtin = item.builtin or (item.id in local.stock_slugs and item.id not in local.extra_slugs)
+            aliases = theme_aliases(item)
+            known_theme_slugs.update(aliases)
+            if item.id:
+                known_theme_slugs.add(item.id)
+            item.installed = bool(aliases & local_slugs)
+            item.current = local.current_slug in aliases
+            item.extra = bool(aliases & local.extra_slugs)
+            item.builtin = item.builtin or (bool(aliases & local.stock_slugs) and not item.extra)
         else:
             row = local.plugins.get(item.id)
             if row:
@@ -187,8 +210,11 @@ def overlay(items: list[Item], local: LocalState) -> list[Item]:
         result.append(item)
 
     for slug, name in local.theme_names.items():
-        if slug in known_theme_slugs:
+        if slug in known_theme_slugs or slugify(slug) in known_theme_slugs:
             continue
+        known_theme_slugs.add(slug)
+        if slugify(slug):
+            known_theme_slugs.add(slugify(slug))
         result.append(
             Item(
                 kind="theme",
@@ -203,8 +229,11 @@ def overlay(items: list[Item], local: LocalState) -> list[Item]:
             )
         )
     for slug in local.extra_slugs | local.stock_slugs:
-        if slug in known_theme_slugs or slug in local.theme_names:
+        if slug in known_theme_slugs or slugify(slug) in known_theme_slugs or slug in local.theme_names:
             continue
+        known_theme_slugs.add(slug)
+        if slugify(slug):
+            known_theme_slugs.add(slugify(slug))
         result.append(
             Item(
                 kind="theme",

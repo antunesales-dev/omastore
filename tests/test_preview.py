@@ -133,6 +133,27 @@ def test_failed_set_keeps_session(monkeypatch, tmp_path: Path) -> None:
     assert json.loads(state.read_text(encoding="utf-8"))["previous"] == "Vantablack"
 
 
+def test_remember_and_apply_refuses_empty_current(monkeypatch, tmp_path: Path) -> None:
+    state = _patch_state(monkeypatch, tmp_path)
+    runner = FakeOmarchy("")
+    result = preview.remember_and_apply("Tokyo Night", runner=runner)
+    assert result["ok"] is False
+    assert "could not read current theme" in result["message"]
+    assert not state.exists()
+    assert not any(argv[:3] == ["omarchy", "theme", "set"] for argv in runner.calls)
+
+
+def test_revert_refuses_empty_previous(monkeypatch, tmp_path: Path) -> None:
+    state = _patch_state(monkeypatch, tmp_path)
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps({"previous": ""}), encoding="utf-8")
+    runner = FakeOmarchy("Tokyo Night")
+    result = preview.revert(runner=runner)
+    assert result["ok"] is False
+    assert not any(argv[:3] == ["omarchy", "theme", "set"] for argv in runner.calls)
+    assert state.exists()
+
+
 def test_revert_restores_previous_and_clears_session(monkeypatch, tmp_path: Path) -> None:
     state = _patch_state(monkeypatch, tmp_path)
     runner = FakeOmarchy("Vantablack")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omastore"
-version = "0.2.0"
+version = "0.2.1"
 description = "A terminal client for the community Omarchy theme and plugin catalogs — not a competing store."
 readme = "README.md"
 license = { text = "MIT" }
@@ -33,7 +33,7 @@ Source = "https://github.com/antunesales-dev/omastore"
 where = ["src"]
 
 [tool.setuptools.package-data]
-omastore = ["*.tcss"]
+omastore = ["*.tcss", "share/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

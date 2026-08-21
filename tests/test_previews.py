@@ -5,7 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
-from omastore.catalog import USER_AGENT
 import pytest
 
 from omastore.previews import (
@@ -22,6 +21,9 @@ from omastore.previews import (
     resolve_preview_path,
 )
 import omastore.previews as previews
+
+_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+_WEBP = b"RIFF" + b"\x00" * 4 + b"WEBP" + b"\x00" * 4
 
 
 def _item(**kwargs) -> SimpleNamespace:
@@ -140,11 +142,11 @@ def test_ensure_cached_downloads_when_missing(monkeypatch, tmp_path: Path) -> No
 
     def fetch(target: str) -> bytes:
         calls.append(target)
-        return b"PNGDATA"
+        return _PNG
 
     path = ensure_cached(url, fetch_bytes=fetch)
     assert path is not None
-    assert path.read_bytes() == b"PNGDATA"
+    assert path.read_bytes() == _PNG
     assert path == tmp_path / "previews" / f"{_digest(url)}.png"
     assert calls == [url]
 
@@ -174,10 +176,10 @@ def test_ensure_cached_refetches_when_stale(monkeypatch, tmp_path: Path) -> None
 
     def fetch(target: str) -> bytes:
         calls.append(target)
-        return b"NEW"
+        return _PNG
 
     got = ensure_cached(url, fetch_bytes=fetch, ttl=PREVIEW_TTL)
-    assert got.read_bytes() == b"NEW"
+    assert got.read_bytes() == _PNG
     assert calls == [url]
 
 
@@ -250,7 +252,7 @@ def test_open_preview_opens_cached_file_uri(monkeypatch, tmp_path: Path) -> None
     url = "https://omarchyplugins.com/assets/img/plugins/foo.webp"
     item = _item(preview_url=url, repo="")
     opened: list[str] = []
-    result = open_preview(item, opener=opened.append, fetch_bytes=lambda _u: b"WEBP")
+    result = open_preview(item, opener=opened.append, fetch_bytes=lambda _u: _WEBP)
     path = cache_path_for(url)
     assert result == {
         "ok": True,
@@ -260,7 +262,7 @@ def test_open_preview_opens_cached_file_uri(monkeypatch, tmp_path: Path) -> None
     }
     assert opened == [path.as_uri()]
     assert urlparse(opened[0]).scheme == "file"
-    assert path.read_bytes() == b"WEBP"
+    assert path.read_bytes() == _WEBP
 
 
 def test_open_preview_refuses_non_http_and_missing(monkeypatch, tmp_path: Path) -> None:
@@ -301,7 +303,7 @@ def test_open_preview_opener_errors_surface_in_message(monkeypatch, tmp_path: Pa
     def boom(_target: str) -> None:
         raise RuntimeError("viewer missing")
 
-    result = open_preview(item, opener=boom, fetch_bytes=lambda _u: b"PNG")
+    result = open_preview(item, opener=boom, fetch_bytes=lambda _u: _PNG)
     assert result["ok"] is False
     assert result["url"] == "https://example.com/preview.png"
     assert result["path"]
@@ -323,39 +325,26 @@ def test_open_preview_defaults_to_xdg_open(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr(previews.subprocess, "run", fake_run)
     item = _item(preview_url="https://example.com/preview.png", repo="")
-    result = open_preview(item, fetch_bytes=lambda _u: b"PNG")
+    result = open_preview(item, fetch_bytes=lambda _u: _PNG)
     assert result["ok"] is True
     assert calls == [["xdg-open", Path(result["path"]).as_uri()]]
 
 
-def test_default_fetch_sends_user_agent(monkeypatch, tmp_path: Path) -> None:
+def test_default_fetch_uses_safety_fetch_bytes(monkeypatch, tmp_path: Path) -> None:
     _patch_cache(monkeypatch, tmp_path)
-    seen: dict[str, str] = {}
+    seen: list[str] = []
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
+    def fake_fetch(url: str, **_kwargs) -> bytes:
+        seen.append(url)
+        return _PNG
 
-        def __exit__(self, *_exc):
-            return None
-
-        def read(self) -> bytes:
-            return b"IMG"
-
-    def fake_urlopen(request, timeout=None):
-        seen["url"] = request.full_url
-        seen["ua"] = request.get_header("User-agent")
-        seen["timeout"] = timeout
-        return FakeResponse()
-
-    monkeypatch.setattr(previews.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(previews, "allowed_fetch_url", lambda _url: True)
+    monkeypatch.setattr(previews, "_safety_fetch_bytes", fake_fetch)
     url = "https://example.com/preview.png"
     path = ensure_cached(url)
     assert path is not None
-    assert path.read_bytes() == b"IMG"
-    assert seen["url"] == url
-    assert seen["ua"] == USER_AGENT
-    assert seen["timeout"] == 20
+    assert path.read_bytes() == _PNG
+    assert seen == [url]
 
 
 def test_image_ext_sniffs_magic() -> None:
@@ -371,6 +360,8 @@ def test_ensure_cached_rejects_html(monkeypatch, tmp_path: Path) -> None:
     url = "https://example.com/preview.png"
     assert ensure_cached(url, fetch_bytes=lambda _u: b"<!DOCTYPE html><html>404</html>") is None
     assert ensure_cached(url, fetch_bytes=lambda _u: b"404: Not Found") is None
+    assert ensure_cached(url, fetch_bytes=lambda _u: b"PNGDATA") is None
+    assert ensure_cached(url, fetch_bytes=lambda _u: b"x") is None
     assert not list(tmp_path.glob("previews/*"))
 
 
@@ -394,6 +385,28 @@ def test_resolve_preview_path_prefers_local(monkeypatch, tmp_path: Path) -> None
 
     path = resolve_preview_path(_item(preview_url="https://example.com/preview.png"), fetch_bytes=boom)
     assert path == shot
+
+
+def test_resolve_preview_path_tries_next_when_first_is_not_image(monkeypatch, tmp_path: Path) -> None:
+    _patch_cache(monkeypatch, tmp_path)
+    catalog = "https://omarchyplugins.com/missing.webp"
+    item = _item(preview_url=catalog)
+    calls: list[str] = []
+
+    def fetch(url: str) -> bytes:
+        calls.append(url)
+        if url == catalog:
+            return b"<!DOCTYPE html><html>404</html>"
+        if url.endswith("/main/preview.png"):
+            return _PNG
+        return b"404: Not Found"
+
+    path = resolve_preview_path(item, fetch_bytes=fetch)
+    assert path is not None
+    assert path.read_bytes() == _PNG
+    assert calls[0] == catalog
+    assert calls[1].endswith("/main/preview.png")
+    assert catalog not in str(path)
 
 
 def test_open_preview_opens_local_file(monkeypatch, tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 from omastore.app import (
     action_groups,
     action_hints,
+    confirm_prompt,
     filter_bar,
     format_action_hints,
     item_markdown,
@@ -22,16 +23,33 @@ def test_sort_puts_current_first() -> None:
     assert [item.id for item in ordered] == ["b", "c", "a"]
 
 
-def test_click_does_not_activate_until_already_selected() -> None:
-    import time
+def test_click_never_activates() -> None:
+    """Click on the list only selects; it does not call _act."""
+    from types import SimpleNamespace
 
     from omastore.app import OmaStoreApp
 
     app = OmaStoreApp()
-    app._highlighted_at = time.monotonic()
-    assert app._should_activate() is False
-    app._highlighted_at = time.monotonic() - 1
-    assert app._should_activate() is True
+    app.selected = Item(
+        kind="theme",
+        id="void",
+        name="Void",
+        install_url="https://github.com/x/void",
+        install_available=True,
+    )
+    acts: list[str] = []
+    app._act = lambda name: acts.append(name)  # type: ignore[method-assign]
+    app._select_key = lambda *args, **kwargs: None  # type: ignore[method-assign]
+
+    app._click_list()
+    assert app._list_pointer is True
+    event = SimpleNamespace(option_id="theme__void")
+    app.on_option_selected(event)  # type: ignore[arg-type]
+    assert acts == []
+    assert app._list_pointer is False
+
+    app.on_option_selected(event)  # type: ignore[arg-type]
+    assert acts == ["install"]
 
 
 def test_list_prompt_marks_installed_themes() -> None:
@@ -259,3 +277,130 @@ def test_render_detail_hides_empty_shots() -> None:
 
     meta = stubs["#meta"].value
     assert "[p] zoom" in (meta.plain if isinstance(meta, Text) else str(meta))
+
+
+def test_confirm_prompt_covers_install_enable_and_warnings() -> None:
+    item = Item(
+        kind="plugin",
+        id="x",
+        name="X[bold]",
+        repo="https://github.com/a/x",
+        verification="unverified",
+        warnings=["runs unsandboxed code"],
+        installed=True,
+    )
+    install = confirm_prompt("install", item)
+    assert 'install plugin “X[bold]”?' in install
+    assert "https://github.com/a/x" in install
+    assert "verification: unverified" in install
+    assert "warnings:" in install
+    assert "- runs unsandboxed code" in install
+    assert "Community plugins and themes run unsandboxed." in install
+    assert "This uses the official omarchy command." in install
+
+    enable = confirm_prompt("enable", item)
+    assert 'enable plugin “X[bold]”?' in enable
+    assert "Community plugins and themes run unsandboxed." in enable
+    assert "official omarchy command" not in enable
+
+
+def test_theme_update_confirm_covers_all_extra_git_themes() -> None:
+    item = Item(kind="theme", id="lumon", name="Lumon", extra=True, install_url="https://github.com/x/lumon")
+    prompt = confirm_prompt("update", item)
+    assert "update all extra git themes?" in prompt
+    assert "Lumon" in prompt
+
+
+def test_confirm_screen_disables_markup() -> None:
+    from omastore.app import ConfirmScreen
+
+    screen = ConfirmScreen('install plugin “X[bold]”?')
+    static = next(screen.compose())
+    assert static._render_markup is False
+    assert "[y] yes   [n] no" in str(static._Static__content)
+
+
+def test_act_confirms_enable_not_apply_or_disable() -> None:
+    from omastore.app import ConfirmScreen, OmaStoreApp
+
+    pushed: list[object] = []
+    ran: list[str] = []
+    app = OmaStoreApp()
+    app.push_screen = lambda screen, callback=None: pushed.append(screen)  # type: ignore[method-assign]
+    app._run_action = lambda name, item: ran.append(name)  # type: ignore[method-assign]
+
+    app.selected = Item(kind="plugin", id="x", name="X", installed=True, enabled=False)
+    app._act("enable")
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], ConfirmScreen)
+    assert "enable plugin" in pushed[0].prompt
+    assert ran == []
+
+    pushed.clear()
+    app.selected = Item(kind="theme", id="tokyo", name="Tokyo", installed=True)
+    app._act("apply")
+    assert pushed == []
+    assert ran == ["apply"]
+
+    app.selected = Item(kind="plugin", id="x", name="X", installed=True, enabled=True)
+    app._act("disable")
+    assert pushed == []
+    assert ran == ["apply", "disable"]
+
+
+def test_search_change_is_debounced() -> None:
+    from types import SimpleNamespace
+
+    from omastore.app import OmaStoreApp
+
+    app = OmaStoreApp()
+    rebuilt: list[str] = []
+    app._rebuild_list = lambda: rebuilt.append("rebuild")  # type: ignore[method-assign]
+    timers: list[object] = []
+
+    class _Timer:
+        def stop(self) -> None:
+            timers.append("stop")
+
+    def set_timer(delay: float, callback):
+        timers.append((delay, callback))
+        return _Timer()
+
+    app.set_timer = set_timer  # type: ignore[method-assign]
+    app.on_search_changed(SimpleNamespace(value="lumon"))  # type: ignore[arg-type]
+    assert rebuilt == []
+    assert timers[-1][0] == 0.2  # type: ignore[index]
+    app.on_search_changed(SimpleNamespace(value="lumon night"))  # type: ignore[arg-type]
+    assert "stop" in timers
+    assert rebuilt == []
+    app._settle_search()
+    assert rebuilt == ["rebuild"]
+
+
+def test_shot_open_file_uses_path_uri(monkeypatch) -> None:
+    from pathlib import Path
+
+    from omastore.app import ShotScreen
+
+    opened: list[str] = []
+    monkeypatch.setattr("omastore.previews._xdg_open", lambda uri: opened.append(uri))
+    screen = ShotScreen("/tmp/preview.png", "Localhost")
+    notes: list[str] = []
+    screen.notify = lambda message, **_kwargs: notes.append(str(message))  # type: ignore[method-assign]
+    screen.action_open_file()
+    assert opened == [Path("/tmp/preview.png").as_uri()]
+
+
+def test_workers_exclusive_groups() -> None:
+    import inspect
+
+    from omastore.app import OmaStoreApp
+
+    try_src = inspect.getsource(OmaStoreApp._run_try)
+    revert_src = inspect.getsource(OmaStoreApp._run_revert)
+    action_src = inspect.getsource(OmaStoreApp._run_action)
+    rebuild_src = inspect.getsource(OmaStoreApp._rebuild_list)
+    assert 'exclusive=True' in try_src and 'group="theme-preview"' in try_src
+    assert 'exclusive=False' in revert_src and 'group="theme-preview"' in revert_src
+    assert 'exclusive=True' in action_src and 'group="action"' in action_src
+    assert "preview_status" not in rebuild_src

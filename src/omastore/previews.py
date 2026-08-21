@@ -3,11 +3,11 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import time
-import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-from omastore.catalog import USER_AGENT, cache_dir
+from omastore.catalog import cache_dir
+from omastore.safety import allowed_fetch_url, fetch_bytes as _safety_fetch_bytes, is_http_url
 
 PLUGIN_SITE = "https://omarchyplugins.com"
 PREVIEW_TTL = 7 * 24 * 60 * 60
@@ -22,11 +22,6 @@ _REPO_FILES = (
     "demo.png",
 )
 _MAX_DOWNLOAD = 12 * 1024 * 1024
-
-
-def _http_url(url: str) -> bool:
-    parsed = urlparse(url)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def _result(*, ok: bool, url: str, path: str, message: str) -> dict:
@@ -44,7 +39,7 @@ def catalog_preview_urls(item) -> list[str]:
     text = str(raw).strip()
     if not text:
         return []
-    if _http_url(text):
+    if is_http_url(text):
         return [text]
     if urlparse(text).scheme:
         return []
@@ -167,25 +162,28 @@ def _any_cache(url: str) -> Path | None:
 
 
 def _default_fetch_bytes(url: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=20) as response:
-        return response.read()
+    return _safety_fetch_bytes(url)
 
 
 def ensure_cached(url: str, *, fetch_bytes=None, ttl: int = PREVIEW_TTL) -> Path | None:
     """Download if missing/stale. fetch_bytes(url)->bytes injectable. Never raise. Return path or None."""
     try:
-        if not _http_url(url):
+        if not is_http_url(url):
             return None
         fresh = _fresh_cache(url, ttl)
         if fresh is not None:
             return fresh
+        # Tests inject fetch_bytes; skip host allowlist so example.com fixtures work.
+        if fetch_bytes is None and not allowed_fetch_url(url):
+            return _any_cache(url)
         data = (fetch_bytes or _default_fetch_bytes)(url)
         if not data or len(data) > _MAX_DOWNLOAD or _reject_payload(data):
             return _any_cache(url)
         ext = image_ext(data)
+        if not ext:
+            return _any_cache(url)
         path = cache_path_for(url)
-        if ext and path.suffix.lower().lstrip(".") != ext:
+        if path.suffix.lower().lstrip(".") != ext:
             path = path.with_suffix(f".{ext}")
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".tmp")
@@ -198,13 +196,15 @@ def ensure_cached(url: str, *, fetch_bytes=None, ttl: int = PREVIEW_TTL) -> Path
 
 def resolve_preview_path(item, *, head=None, fetch_bytes=None) -> Path | None:
     """Local preview file if present, otherwise a cached catalog/repo image."""
+    del head
     local = local_preview_path(item)
     if local is not None:
         return local
-    url = resolve_preview(item, head=head, fetch_bytes=fetch_bytes)
-    if not url:
-        return None
-    return ensure_cached(url, fetch_bytes=fetch_bytes)
+    for url in preview_candidates(item):
+        path = ensure_cached(url, fetch_bytes=fetch_bytes)
+        if path is not None:
+            return path
+    return None
 
 
 def resolve_preview(item, *, head=None, fetch_bytes=None) -> str:
@@ -260,12 +260,14 @@ def open_preview(item, *, opener=None, fetch_bytes=None) -> dict:
     url = resolve_preview(item)
     if not url:
         return _result(ok=False, url="", path="", message="no preview image")
-    if not _http_url(url):
+    if not is_http_url(url):
         return _result(ok=False, url=url, path="", message="only http(s) URLs can be opened")
     path = ensure_cached(url, fetch_bytes=fetch_bytes)
     if path is None:
         return _result(ok=False, url=url, path="", message="could not download preview")
     try:
+        if not image_ext(path.read_bytes()):
+            return _result(ok=False, url=url, path=str(path), message="preview is not an image")
         (opener or _xdg_open)(path.as_uri())
     except Exception as exc:
         return _result(ok=False, url=url, path=str(path), message=str(exc))

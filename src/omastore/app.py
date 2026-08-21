@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -137,6 +135,26 @@ def format_action_hints(actions: list[str], width: int = 48) -> str:
     return "\n".join(lines)
 
 
+def confirm_prompt(action: str, item: Item) -> str:
+    if action == "update" and item.kind == "theme":
+        lines = ["update all extra git themes?", f"{item.kind} “{item.name}”?"]
+    else:
+        lines = [f"{action} {item.kind} “{item.name}”?"]
+    loc = item.repo or item.install_url
+    if loc:
+        lines.append(str(loc))
+    if item.verification_label:
+        lines.append(f"verification: {item.verification_label}")
+    if item.warnings:
+        lines.append("warnings:")
+        lines.extend(f"- {warning}" for warning in item.warnings)
+    if action in {"install", "enable"}:
+        lines.append("Community plugins and themes run unsandboxed.")
+    if action == "install":
+        lines.append("This uses the official omarchy command.")
+    return "\n".join(lines)
+
+
 def filter_bar(query: Query) -> str:
     bits: list[str] = []
     if query.status != "all":
@@ -253,7 +271,7 @@ class ConfirmScreen(ModalScreen[bool]):
         self.prompt = prompt
 
     def compose(self) -> ComposeResult:
-        yield Static(self.prompt + "\n\n[y] yes   [n] no", id="confirm")
+        yield Static(self.prompt + "\n\n[y] yes   [n] no", id="confirm", markup=False)
 
     def action_yes(self) -> None:
         self.dismiss(True)
@@ -328,10 +346,12 @@ class ShotScreen(ModalScreen[None]):
         self._apply_zoom()
 
     def action_open_file(self) -> None:
+        from pathlib import Path
+
         from omastore.previews import _xdg_open
 
         try:
-            _xdg_open(f"file://{self.path}")
+            _xdg_open(Path(self.path).as_uri())
             self.notify(f"opened {self.path}")
         except Exception as exc:
             self.notify(str(exc), severity="error")
@@ -409,9 +429,11 @@ class OmaStoreApp(App[None]):
         self.selected: Item | None = None
         self.status_text = "loading catalogs…"
         self._readme_key = ""
-        self._highlighted_at = 0.0
+        self._list_pointer = False
         self._about_timer = None
+        self._search_timer = None
         self._pending_about_key = ""
+        self._try_session: dict | None = None
         self._shots: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
@@ -523,7 +545,7 @@ class OmaStoreApp(App[None]):
         result = remember_and_apply(item.name)
         self.call_from_thread(self._preview_done, "try", result)
 
-    @work(thread=True, exclusive=True, group="theme-preview")
+    @work(thread=True, exclusive=False, group="theme-preview")
     def _run_revert(self) -> None:
         from omastore.preview import revert
 
@@ -534,6 +556,13 @@ class OmaStoreApp(App[None]):
         message = str(result.get("message") or name)
         if result.get("ok"):
             self.notify(message)
+            if name == "try":
+                self._try_session = {
+                    "previous": str(result.get("previous") or ""),
+                    "current": str(result.get("current") or ""),
+                }
+            elif name == "revert":
+                self._try_session = None
         else:
             self.notify(message, severity="error")
         self.load_items()
@@ -595,6 +624,13 @@ class OmaStoreApp(App[None]):
     @on(Input.Changed, "#search")
     def on_search_changed(self, event: Input.Changed) -> None:
         self.search = event.value
+        if self._search_timer is not None:
+            self._search_timer.stop()
+            self._search_timer = None
+        self._search_timer = self.set_timer(0.2, self._settle_search)
+
+    def _settle_search(self) -> None:
+        self._search_timer = None
         self._rebuild_list()
 
     def _active_query(self) -> Query:
@@ -604,22 +640,24 @@ class OmaStoreApp(App[None]):
     def on_search_submitted(self, event: Input.Submitted) -> None:
         self.query_one("#list", OptionList).focus()
 
+    @on(Click, "#list")
+    def _click_list(self) -> None:
+        self._list_pointer = True
+
     @on(OptionList.OptionHighlighted, "#list")
     def on_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         if event.option_id:
-            self._highlighted_at = time.monotonic()
             self._select_key(event.option_id, immediate=False)
 
     @on(OptionList.OptionSelected, "#list")
     def on_option_selected(self, event: OptionList.OptionSelected) -> None:
+        pointer = self._list_pointer
+        self._list_pointer = False
         if event.option_id:
             self._select_key(event.option_id, immediate=True)
-        if not self._should_activate():
+        if pointer:
             return
         self._activate_selected()
-
-    def _should_activate(self) -> bool:
-        return time.monotonic() - self._highlighted_at >= 0.25
 
     def _activate_selected(self) -> None:
         item = self.selected
@@ -645,8 +683,13 @@ class OmaStoreApp(App[None]):
         plugins = sum(1 for item in items if item.kind == "plugin")
         installed = sum(1 for item in items if item.installed)
         self.status_text = f"{themes} themes  ·  {plugins} plugins  ·  {installed} installed{extra_status}"
+        try:
+            from omastore.preview import _load_session
+
+            self._try_session = _load_session()
+        except Exception:
+            pass
         self._rebuild_list()
-        self._status()
 
     def _paint_tabs(self) -> None:
         for name in ("themes", "plugins", "installed"):
@@ -677,18 +720,24 @@ class OmaStoreApp(App[None]):
         active = self._active_query()
         self.query_one("#filters", Static).update(filter_bar(active))
         extra = ""
+        session = self._try_session
+        if session:
+            previous_theme = str(session.get("previous") or "")
+            current = str(session.get("current") or "")
+            if not current:
+                current = next(
+                    (item.name for item in self.items if item.kind == "theme" and item.current),
+                    "",
+                )
+            extra += f"  ·  trying {current}  [b] back to {previous_theme}"
         try:
-            from omastore.preview import preview_status
             from omastore.updates import outdated_items
 
-            preview = preview_status()
-            if preview.get("active"):
-                extra += f"  ·  trying {preview.get('current') or ''}  [b] back to {preview.get('previous')}"
             n_old = len(outdated_items(self.items))
             if n_old:
                 extra += f"  ·  {n_old} outdated"
         except Exception:
-            extra = ""
+            pass
         credit = f"{THEME_STORE_AUTHOR} · {PLUGIN_STORE_AUTHOR}  ?"
         self.query_one("#status", Static).update(
             f"{self.status_text}  ·  {len(self.shown)} shown{extra}    {credit}"
@@ -827,20 +876,17 @@ class OmaStoreApp(App[None]):
         }
         if not allowed.get(name):
             return
-        prompt = f"{name} {item.kind} “{item.name}”?"
-        if name == "install":
-            prompt += "\nThis clones the repo with the official omarchy command."
-        if name in {"install", "remove", "update"}:
+        if name in {"install", "remove", "update", "enable"}:
 
             def confirmed(ok: bool | None, action=name, target=item) -> None:
                 if ok:
                     self._run_action(action, target)
 
-            self.push_screen(ConfirmScreen(prompt), confirmed)
+            self.push_screen(ConfirmScreen(confirm_prompt(name, item)), confirmed)
             return
         self._run_action(name, item)
 
-    @work(thread=True)
+    @work(thread=True, exclusive=True, group="action")
     def _run_action(self, name: str, item: Item) -> None:
         runners = {
             "install": install,

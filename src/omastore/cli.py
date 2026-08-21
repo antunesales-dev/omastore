@@ -133,6 +133,27 @@ def cmd_info(args: argparse.Namespace) -> int:
 def _act(args: argparse.Namespace, name: str) -> int:
     items, _ = _load(force=args.refresh)
     item = _find(items, args.id)
+    allowed = {
+        "install": item.can_install,
+        "apply": item.can_apply,
+        "enable": item.can_enable,
+        "disable": item.can_disable,
+        "update": item.can_update,
+        "remove": item.can_remove,
+    }
+    if not allowed.get(name):
+        print(f"cannot {name} {item.key}")
+        return 1
+    if name in {"install", "remove", "update", "enable"} and not args.yes and not args.dry_run:
+        print(item.key)
+        if item.repo:
+            print(item.repo)
+        if item.verification_label:
+            print(item.verification_label)
+        for warning in item.warnings:
+            print(warning)
+        print("pass --yes to proceed")
+        return 2
     runners = {
         "install": install,
         "apply": apply_theme,
@@ -246,6 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"omastore {__version__}")
     parser.add_argument("--refresh", action="store_true", help="ignore cached catalogs")
     parser.add_argument("--dry-run", action="store_true", help="print omarchy commands without running them")
+    parser.add_argument("--yes", action="store_true", help="confirm install/remove/update")
     sub = parser.add_subparsers(dest="cmd")
 
     tui = sub.add_parser("tui", help="open the store TUI (default)")

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Omastore
+GenericName=Community catalog browser
+Comment=Browse limehawk and HANCORE's Omarchy catalogs in the terminal
+Exec=xdg-terminal-exec --app-id=TUI.float -e omastore
+Icon=omastore
+Terminal=false
+Categories=Settings;Utility;
+Keywords=omarchy;theme;plugin;store;omastore;
+StartupNotify=true
+StartupWMClass=TUI.float

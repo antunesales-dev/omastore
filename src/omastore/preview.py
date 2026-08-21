@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from omastore.safety import safe_cli_arg
+
 Runner = Callable[..., Any]
 
 _OMARCHY_MISSING = "omarchy CLI not found on PATH"
@@ -100,23 +102,34 @@ def remember_and_apply(theme_name: str, *, runner: Runner | None = None) -> dict
     Return {ok, previous, current, message}.
     If a session is already active, do NOT overwrite previous — just set the new theme.
     """
+    name = safe_cli_arg(theme_name)
+    if not name:
+        return _result(ok=False, previous="", current="", message="refused theme name")
+
     session = _load_session()
     if session is None:
         completed = _invoke(runner, "theme", "current")
         if completed is None:
             return _result(ok=False, previous="", current="", message=_OMARCHY_MISSING)
-        previous = (completed.stdout or "").strip() if completed.returncode == 0 else ""
+        if completed.returncode != 0:
+            message = (completed.stderr or completed.stdout or "could not read current theme").strip()
+            return _result(ok=False, previous="", current="", message=message)
+        previous = (completed.stdout or "").strip()
+        if not safe_cli_arg(previous):
+            return _result(ok=False, previous="", current="", message="could not read current theme")
         _save_session(previous)
     else:
         previous = str(session.get("previous") or "")
+        if not safe_cli_arg(previous):
+            return _result(ok=False, previous=previous, current="", message="could not read current theme")
 
-    completed = _invoke(runner, "theme", "set", theme_name)
+    completed = _invoke(runner, "theme", "set", name)
     if completed is None:
         return _result(ok=False, previous=previous, current=current_theme_name(runner=runner), message=_OMARCHY_MISSING)
     if completed.returncode != 0:
         message = (completed.stderr or completed.stdout or "failed to apply theme").strip()
         return _result(ok=False, previous=previous, current=current_theme_name(runner=runner), message=message)
-    return _result(ok=True, previous=previous, current=theme_name, message=f"previewing {theme_name}")
+    return _result(ok=True, previous=previous, current=name, message=f"previewing {name}")
 
 
 def revert(*, runner: Runner | None = None) -> dict:
@@ -133,7 +146,15 @@ def revert(*, runner: Runner | None = None) -> dict:
             message=_NO_SESSION,
         )
     previous = str(session.get("previous") or "")
-    completed = _invoke(runner, "theme", "set", previous)
+    previous_safe = safe_cli_arg(previous)
+    if not previous_safe:
+        return _result(
+            ok=False,
+            previous=previous,
+            current=current_theme_name(runner=runner),
+            message="could not read current theme",
+        )
+    completed = _invoke(runner, "theme", "set", previous_safe)
     if completed is None:
         return _result(ok=False, previous=previous, current=current_theme_name(runner=runner), message=_OMARCHY_MISSING)
     if completed.returncode != 0:
