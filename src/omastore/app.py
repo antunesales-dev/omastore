@@ -57,8 +57,12 @@ def sort_items(items: list[Item], tab: Tab, query: Query | None = None) -> list[
 
 def list_prompt(item: Item, width: int = 40) -> Text:
     text = Text()
-    mark = "●" if item.current or (item.kind == "plugin" and item.enabled) else "○"
-    style = "green" if mark == "●" else "dim"
+    if item.current or (item.kind == "plugin" and item.enabled):
+        mark, style = "●", "green"
+    elif item.installed:
+        mark, style = "●", "cyan"
+    else:
+        mark, style = "○", "dim"
     text.append(f"{mark} ", style=style)
     badge = item.verification_label
     if badge == "verified":
@@ -323,17 +327,36 @@ class OmaStoreApp(App[None]):
         item = self.selected
         if item is None or item.kind != "theme":
             return
+        if not item.installed:
+            self.notify(f"{item.name} is not installed yet. Install it, then try.", severity="warning")
+            return
+        self.notify(f"trying {item.name}…")
+        self._run_try(item)
+
+    def action_revert_theme(self) -> None:
+        self.notify("restoring previous theme…")
+        self._run_revert()
+
+    @work(thread=True, exclusive=True, group="theme-preview")
+    def _run_try(self, item: Item) -> None:
         from omastore.preview import remember_and_apply
 
         result = remember_and_apply(item.name)
-        self.notify(str(result.get("message") or "try"))
-        self.load_items()
+        self.call_from_thread(self._preview_done, "try", result)
 
-    def action_revert_theme(self) -> None:
+    @work(thread=True, exclusive=True, group="theme-preview")
+    def _run_revert(self) -> None:
         from omastore.preview import revert
 
         result = revert()
-        self.notify(str(result.get("message") or "revert"))
+        self.call_from_thread(self._preview_done, "revert", result)
+
+    def _preview_done(self, name: str, result: dict) -> None:
+        message = str(result.get("message") or name)
+        if result.get("ok"):
+            self.notify(message)
+        else:
+            self.notify(message, severity="error")
         self.load_items()
 
     def action_open_repo(self) -> None:
@@ -532,7 +555,8 @@ class OmaStoreApp(App[None]):
         if item.can_install:
             actions.append("[i] install")
         if item.kind == "theme":
-            actions.append("[t] try")
+            if item.installed:
+                actions.append("[t] try")
             actions.append("[b] back")
         if item.can_apply:
             actions.append("[a] apply")

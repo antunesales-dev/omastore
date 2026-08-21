@@ -24,6 +24,35 @@ def test_click_does_not_activate_until_already_selected() -> None:
     assert app._should_activate() is True
 
 
+def test_list_prompt_marks_installed_themes() -> None:
+    from omastore.app import list_prompt
+
+    current = Item(kind="theme", id="spacex", name="Spacex", installed=True, current=True)
+    extra = Item(kind="theme", id="lumon", name="Lumon", installed=True, extra=True)
+    catalog = Item(kind="theme", id="void", name="Void")
+    on = list_prompt(current)
+    have = list_prompt(extra)
+    missing = list_prompt(catalog)
+    assert "●" in on.plain
+    assert "●" in have.plain
+    assert "○" in missing.plain
+    assert "green" in str(on.spans)
+    assert "cyan" in str(have.spans)
+    assert "dim" in str(missing.spans)
+
+
+def test_try_requires_installed_theme() -> None:
+    from omastore.app import OmaStoreApp
+
+    app = OmaStoreApp()
+    app.selected = Item(kind="theme", id="void", name="Void")
+    notes: list[str] = []
+    app.notify = lambda message, **_kwargs: notes.append(str(message))  # type: ignore[method-assign]
+    app.action_try_theme()
+    assert notes
+    assert "not installed" in notes[0]
+
+
 def test_list_prompt_marks_verification() -> None:
     from omastore.app import list_prompt
 

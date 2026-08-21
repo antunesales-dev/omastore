@@ -174,11 +174,11 @@ def sort_key(item: Item, sort: str, tab: Tab) -> tuple:
     if tab == "plugins":
         group = 0 if item.installed else 1
         return (group, item.name.lower(), item.id.lower())
-    community = not item.first_party and item.source_type != "builtin"
+    installed = bool(item.installed or item.current)
     base = (
         0 if item.current else 1,
-        0 if item.installed and community else 1,
-        0 if community else 1,
+        0 if installed else 1,
+        0 if item.extra else 1,
     )
     if sort == "name":
         return (*base, item.name.lower())

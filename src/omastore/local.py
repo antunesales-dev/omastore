@@ -80,6 +80,8 @@ def run_omarchy(*args: str, check: bool = False) -> subprocess.CompletedProcess[
         check=check,
         text=True,
         capture_output=True,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
     )
 
 

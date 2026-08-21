@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+import subprocess
 from subprocess import CompletedProcess
 
 import omastore.preview as preview
@@ -55,6 +56,18 @@ def test_default_state_path_falls_back_to_home(monkeypatch, tmp_path: Path) -> N
 def test_current_theme_name_strips_output() -> None:
     runner = FakeOmarchy("  Lumon  ")
     assert preview.current_theme_name(runner=runner) == "Lumon"
+
+
+def test_theme_set_timeout_is_an_error(monkeypatch, tmp_path: Path) -> None:
+    _patch_state(monkeypatch, tmp_path)
+
+    def boom(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout") or 120)
+
+    monkeypatch.setattr(preview.subprocess, "run", boom)
+    result = preview.remember_and_apply("Tokyo Night")
+    assert result["ok"] is False
+    assert "timed out" in result["message"]
 
 
 def test_current_theme_name_empty_when_omarchy_missing() -> None:
