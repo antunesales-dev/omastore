@@ -94,9 +94,10 @@ Footer {
 
 #shot {
     height: auto;
-    max-height: 16;
+    max-height: 22;
     padding: 0 0 1 0;
     margin-bottom: 1;
+    background: #161616;
 }
 
 #readme {

@@ -79,6 +79,40 @@ def test_to_ansi_half_blocks_from_ppm(monkeypatch, tmp_path: Path) -> None:
     assert out.endswith("\x1b[0m")
 
 
+def test_ppm_resize_keeps_aspect_and_is_not_smashed(monkeypatch, tmp_path: Path) -> None:
+    from omastore import ansi_image
+
+    image = tmp_path / "x.png"
+    image.write_bytes(b"x")
+    seen: list[list[str]] = []
+
+    class Result:
+        returncode = 0
+        stdout = _p6_2x2()
+
+    def fake_run(cmd, **_kwargs):
+        seen.append(list(cmd))
+        return Result()
+
+    monkeypatch.setattr(ansi_image, "_magick", lambda: "magick")
+    monkeypatch.setattr(ansi_image.subprocess, "run", fake_run)
+    assert ansi_image._ppm_bytes(image, 72, 40)
+    cmd = seen[0]
+    joined = " ".join(cmd)
+    assert "72x40!" not in joined
+    assert "Lanczos" in cmd
+    assert "-extent" in cmd
+    assert "72x40" in cmd
+
+
+def test_box_height_is_even() -> None:
+    from omastore.ansi_image import _box
+
+    assert _box(72, 40) == (72, 40)
+    assert _box(72, 41) == (72, 42)
+    assert _box(8, 3)[1] % 2 == 0
+
+
 def test_fixture_png_to_ansi() -> None:
     if not FIXTURE.is_file():
         return

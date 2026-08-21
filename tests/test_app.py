@@ -125,6 +125,15 @@ def test_shots_cache_starts_empty() -> None:
     assert OmaStoreApp()._shots == {}
 
 
+def test_shot_pixels_are_even_16_by_9() -> None:
+    from omastore.app import OmaStoreApp
+
+    width, height = OmaStoreApp()._shot_pixels()
+    assert width >= 56
+    assert height % 2 == 0
+    assert 28 <= height <= 44
+
+
 def test_markdown_mentions_extra_details_not_required() -> None:
     for extra in (True, False):
         item = Item(

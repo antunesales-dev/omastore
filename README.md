@@ -123,7 +123,7 @@ omastore about
 | `?` | credits |
 | `q` | quit |
 
-Theme detail shows the catalog palette. After you settle on a row, omastore also tries a catalog or GitHub screenshot (half-block ANSI in the pane; `p` opens the file). Thin plugin listings fill empty fields from the author's `manifest.json` without overwriting catalog text. Plugin about is still the marketplace listing plus the upstream README.
+Theme detail shows the catalog palette. After you settle on a row, omastore also shows a 16:9 screenshot: the theme's own `preview.png` if it is installed, otherwise a catalog or GitHub image, rendered as half-block ANSI (`p` opens the file). Thin plugin listings fill empty fields from the author's `manifest.json` without overwriting catalog text. Plugin about is still the marketplace listing plus the upstream README.
 
 ## Catalogs
 

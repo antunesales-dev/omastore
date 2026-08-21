@@ -6,16 +6,20 @@ from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from omastore.catalog import USER_AGENT
+import pytest
+
 from omastore.previews import (
     PLUGIN_SITE,
     PREVIEW_TTL,
     cache_path_for,
     catalog_preview_urls,
     ensure_cached,
+    image_ext,
     open_preview,
     preview_candidates,
     repo_preview_urls,
     resolve_preview,
+    resolve_preview_path,
 )
 import omastore.previews as previews
 
@@ -38,6 +42,11 @@ def _patch_cache(monkeypatch, tmp_path: Path) -> Path:
 
 def _digest(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+
+
+@pytest.fixture(autouse=True)
+def _no_local_previews(monkeypatch) -> None:
+    monkeypatch.setattr(previews, "local_preview_path", lambda _item: None)
 
 
 def test_catalog_preview_urls_keeps_http() -> None:
@@ -347,3 +356,52 @@ def test_default_fetch_sends_user_agent(monkeypatch, tmp_path: Path) -> None:
     assert seen["url"] == url
     assert seen["ua"] == USER_AGENT
     assert seen["timeout"] == 20
+
+
+def test_image_ext_sniffs_magic() -> None:
+    assert image_ext(b"\x89PNG\r\n\x1a\nrest") == "png"
+    assert image_ext(b"\xff\xd8\xff\xdb") == "jpg"
+    assert image_ext(b"RIFF....WEBP....") == "webp"
+    assert image_ext(b"<html>404</html>") == ""
+    assert image_ext(b"PNGDATA") == ""
+
+
+def test_ensure_cached_rejects_html(monkeypatch, tmp_path: Path) -> None:
+    _patch_cache(monkeypatch, tmp_path)
+    url = "https://example.com/preview.png"
+    assert ensure_cached(url, fetch_bytes=lambda _u: b"<!DOCTYPE html><html>404</html>") is None
+    assert ensure_cached(url, fetch_bytes=lambda _u: b"404: Not Found") is None
+    assert not list(tmp_path.glob("previews/*"))
+
+
+def test_ensure_cached_sniffs_extension_when_url_has_none(monkeypatch, tmp_path: Path) -> None:
+    _patch_cache(monkeypatch, tmp_path)
+    url = "https://github.com/user-attachments/assets/abc-def"
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+    path = ensure_cached(url, fetch_bytes=lambda _u: png)
+    assert path is not None
+    assert path.suffix == ".png"
+    assert path.read_bytes() == png
+
+
+def test_resolve_preview_path_prefers_local(monkeypatch, tmp_path: Path) -> None:
+    shot = tmp_path / "preview.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    monkeypatch.setattr(previews, "local_preview_path", lambda _item: shot)
+
+    def boom(_url: str) -> bytes:
+        raise AssertionError("network")
+
+    path = resolve_preview_path(_item(preview_url="https://example.com/preview.png"), fetch_bytes=boom)
+    assert path == shot
+
+
+def test_open_preview_opens_local_file(monkeypatch, tmp_path: Path) -> None:
+    shot = tmp_path / "preview.png"
+    shot.write_bytes(b"x")
+    monkeypatch.setattr(previews, "local_preview_path", lambda _item: shot)
+    opened: list[str] = []
+    result = open_preview(_item(), opener=opened.append, fetch_bytes=lambda _u: b"nope")
+    assert result["ok"] is True
+    assert result["path"] == str(shot)
+    assert opened == [shot.as_uri()]

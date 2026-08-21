@@ -537,7 +537,25 @@ class OmaStoreApp(App[None]):
         if item.readme and cached:
             self._render_detail(item, settled=True)
             return
-        self._load_about(item.key, fetch_image=not cached)
+        width, height = self._shot_pixels()
+        self._load_about(item.key, fetch_image=not cached, width=width, height=height)
+
+    def _shot_pixels(self) -> tuple[int, int]:
+        width = 72
+        try:
+            detail = self.query_one("#detail")
+            inner = int(detail.size.width) - 6
+            if inner >= 40:
+                width = max(56, min(80, inner))
+        except Exception:
+            pass
+        height = (width * 9) // 16
+        if height % 2:
+            height += 1
+        height = max(28, min(44, height))
+        if height % 2:
+            height += 1
+        return width, height
 
     def _render_detail(self, item: Item | None, *, settled: bool = False) -> None:
         meta = self.query_one("#meta", Static)
@@ -600,20 +618,25 @@ class OmaStoreApp(App[None]):
             readme.update(item_markdown(item, include_readme=False, loading=True))
 
     @work(thread=True, exclusive=True, group="about")
-    def _load_about(self, key: str, fetch_image: bool = True) -> None:
+    def _load_about(
+        self,
+        key: str,
+        fetch_image: bool = True,
+        width: int = 72,
+        height: int = 40,
+    ) -> None:
         item = next((row for row in self.items if row.key == key), None)
         if item is None:
             return
         from omastore.ansi_image import to_ansi
         from omastore.enrich import enrich_item
-        from omastore.previews import ensure_cached, resolve_preview
+        from omastore.previews import resolve_preview_path
 
         enrich_item(item)
         ansi = ""
         if fetch_image:
-            url = resolve_preview(item)
-            path = ensure_cached(url) if url else None
-            ansi = to_ansi(path, width=48, height=14) if path else ""
+            path = resolve_preview_path(item)
+            ansi = to_ansi(path, width=width, height=height) if path else ""
         if not item.readme:
             item.readme = fetch_readme(item)
         self.call_from_thread(self._apply_about, key, ansi, fetch_image)

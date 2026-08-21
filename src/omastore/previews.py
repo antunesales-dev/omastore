@@ -21,6 +21,7 @@ _REPO_FILES = (
     "docs/screenshot.png",
     "demo.png",
 )
+_MAX_DOWNLOAD = 12 * 1024 * 1024
 
 
 def _http_url(url: str) -> bool:
@@ -103,6 +104,68 @@ def cache_path_for(url: str) -> Path:
     return cache_dir() / "previews" / f"{digest}.{ext}"
 
 
+def image_ext(data: bytes) -> str:
+    """Return png/jpg/webp/gif/bmp if `data` looks like an image, else ''."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    if data.startswith(b"GIF8"):
+        return "gif"
+    if data.startswith(b"BM"):
+        return "bmp"
+    return ""
+
+
+def _reject_payload(data: bytes) -> bool:
+    head = data.lstrip()[:48].lower()
+    return head.startswith((b"<", b"{", b"404", b"not found", b"error"))
+
+
+def local_preview_path(item) -> Path | None:
+    """Installed theme/plugin preview.png on disk, if any."""
+    from omastore.local import plugin_preview_file, theme_preview_file
+
+    kind = getattr(item, "kind", "")
+    ident = str(getattr(item, "id", "") or "")
+    if kind == "theme":
+        return theme_preview_file(ident)
+    if kind == "plugin":
+        return plugin_preview_file(ident)
+    return None
+
+
+def _cached_files(url: str) -> list[Path]:
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    direct = cache_path_for(url)
+    found: list[Path] = []
+    seen: set[Path] = set()
+    candidates = [direct]
+    if direct.parent.is_dir():
+        candidates.extend(sorted(direct.parent.glob(f"{digest}.*")))
+    for path in candidates:
+        if path.suffix == ".tmp" or not path.is_file() or path in seen:
+            continue
+        seen.add(path)
+        found.append(path)
+    return found
+
+
+def _fresh_cache(url: str, ttl: int) -> Path | None:
+    now = time.time()
+    for path in _cached_files(url):
+        if (now - path.stat().st_mtime) < ttl:
+            return path
+    return None
+
+
+def _any_cache(url: str) -> Path | None:
+    files = _cached_files(url)
+    return files[0] if files else None
+
+
 def _default_fetch_bytes(url: str) -> bytes:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=20) as response:
@@ -111,25 +174,37 @@ def _default_fetch_bytes(url: str) -> bytes:
 
 def ensure_cached(url: str, *, fetch_bytes=None, ttl: int = PREVIEW_TTL) -> Path | None:
     """Download if missing/stale. fetch_bytes(url)->bytes injectable. Never raise. Return path or None."""
-    path: Path | None = None
     try:
         if not _http_url(url):
             return None
-        path = cache_path_for(url)
-        if path.is_file() and (time.time() - path.stat().st_mtime) < ttl:
-            return path
+        fresh = _fresh_cache(url, ttl)
+        if fresh is not None:
+            return fresh
         data = (fetch_bytes or _default_fetch_bytes)(url)
-        if not data:
-            return path if path.is_file() else None
+        if not data or len(data) > _MAX_DOWNLOAD or _reject_payload(data):
+            return _any_cache(url)
+        ext = image_ext(data)
+        path = cache_path_for(url)
+        if ext and path.suffix.lower().lstrip(".") != ext:
+            path = path.with_suffix(f".{ext}")
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".tmp")
         tmp.write_bytes(data)
         tmp.replace(path)
         return path
     except Exception:
-        if path is not None and path.is_file():
-            return path
+        return _any_cache(url)
+
+
+def resolve_preview_path(item, *, head=None, fetch_bytes=None) -> Path | None:
+    """Local preview file if present, otherwise a cached catalog/repo image."""
+    local = local_preview_path(item)
+    if local is not None:
+        return local
+    url = resolve_preview(item, head=head, fetch_bytes=fetch_bytes)
+    if not url:
         return None
+    return ensure_cached(url, fetch_bytes=fetch_bytes)
 
 
 def resolve_preview(item, *, head=None, fetch_bytes=None) -> str:
@@ -171,10 +246,17 @@ def _xdg_open(target: str) -> None:
 
 
 def open_preview(item, *, opener=None, fetch_bytes=None) -> dict:
-    """{ok, url, path, message}. Prefer cached file opened via xdg-open of the URL or file:// path.
+    """{ok, url, path, message}. Prefer a local preview, then a cached catalog/repo file.
 
-    opener(url_or_path) injectable. Refuse non-http and missing.
+    opener(url_or_path) injectable. Refuse non-http remote URLs.
     """
+    local = local_preview_path(item)
+    if local is not None:
+        try:
+            (opener or _xdg_open)(local.as_uri())
+        except Exception as exc:
+            return _result(ok=False, url="", path=str(local), message=str(exc))
+        return _result(ok=True, url="", path=str(local), message=f"opened {local}")
     url = resolve_preview(item)
     if not url:
         return _result(ok=False, url="", path="", message="no preview image")

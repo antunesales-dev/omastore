@@ -7,8 +7,11 @@ from pathlib import Path
 NO_PREVIEW = "no preview"
 _HALF_BLOCK = "▀"
 _RESET = "\x1b[0m"
-_TIMEOUT = 8
+_TIMEOUT = 12
 _WS = b" \t\r\n"
+DEFAULT_WIDTH = 72
+DEFAULT_HEIGHT = 40
+_PAD = "#111111"
 
 
 def parse_ppm(data: bytes) -> tuple[int, int, list[tuple[int, int, int]]]:
@@ -101,11 +104,38 @@ def _magick() -> str | None:
     return shutil.which("magick") or shutil.which("convert")
 
 
+def _box(width: int, height: int) -> tuple[int, int]:
+    cols = max(8, min(int(width), 120))
+    rows = max(4, min(int(height), 80))
+    if rows % 2:
+        rows += 1
+    return cols, rows
+
+
 def _ppm_bytes(path: Path, width: int, height: int) -> bytes | None:
     binary = _magick()
     if binary is None:
         return None
-    cmd = [binary, str(path), "-resize", f"{width}x{height}!", "ppm:-"]
+    cols, rows = _box(width, height)
+    geom = f"{cols}x{rows}"
+    cmd = [
+        binary,
+        str(path),
+        "-auto-orient",
+        "-filter",
+        "Lanczos",
+        "-resize",
+        geom,
+        "-background",
+        _PAD,
+        "-gravity",
+        "center",
+        "-extent",
+        geom,
+        "-unsharp",
+        "0x0.6+0.6+0.02",
+        "ppm:-",
+    ]
     try:
         completed = subprocess.run(
             cmd,
@@ -142,7 +172,7 @@ def _render_ansi(width: int, height: int, pixels: list[tuple[int, int, int]]) ->
     return "\n".join(lines)
 
 
-def to_ansi(path: str | Path, *, width: int = 40, height: int = 12) -> str:
+def to_ansi(path: str | Path, *, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT) -> str:
     """Render image as unicode half-block ANSI (or a plain fallback message)."""
     try:
         image = Path(path)
@@ -159,7 +189,7 @@ def to_ansi(path: str | Path, *, width: int = 40, height: int = 12) -> str:
         return NO_PREVIEW
 
 
-def to_rich(path: str | Path, *, width: int = 40, height: int = 12):
+def to_rich(path: str | Path, *, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT):
     """Return rich.text.Text for the ANSI preview (or 'no preview')."""
     from rich.text import Text
 
