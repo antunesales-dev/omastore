@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from omastore import __version__
 from omastore.models import Item, parse_plugin, parse_theme
 
-USER_AGENT = "omastore/0.1 (+https://github.com/antunesales-dev/omastore)"
+USER_AGENT = f"omastore/{__version__} (+https://github.com/antunesales-dev/omastore)"
 THEME_CATALOG_URL = (
     "https://raw.githubusercontent.com/limehawk/omarchy-theme-website/"
     "main/src/data/themes-data.json"
