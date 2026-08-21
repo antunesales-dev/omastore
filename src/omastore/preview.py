@@ -27,13 +27,28 @@ def _state_file() -> Path:
     return Path(STATE_PATH)
 
 
+_THEME_SET_TIMEOUT = 120
+
+
 def _invoke(runner: Runner | None, *cli: str) -> subprocess.CompletedProcess[str] | None:
     command = ["omarchy", *cli]
     invoke = subprocess.run if runner is None else runner
+    kwargs: dict[str, Any] = {
+        "check": False,
+        "text": True,
+        "capture_output": True,
+        "stdin": subprocess.DEVNULL,
+    }
+    if runner is None:
+        kwargs["start_new_session"] = True
+        if len(cli) >= 2 and cli[0] == "theme" and cli[1] == "set":
+            kwargs["timeout"] = _THEME_SET_TIMEOUT
     try:
-        return invoke(command, check=False, text=True, capture_output=True)
+        return invoke(command, **kwargs)
     except FileNotFoundError:
         return None
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(command, 1, "", "omarchy theme set timed out")
 
 
 def _load_session() -> dict[str, Any] | None:

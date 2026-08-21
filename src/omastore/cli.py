@@ -44,8 +44,16 @@ def _print_item(item: Item, *, verbose: bool = False) -> None:
     if item.repo:
         print(f"         {item.repo}")
     if verbose:
+        if item.version:
+            print(f"         version: {item.version}")
+        if item.license:
+            print(f"         license: {item.license}")
+        if item.category:
+            print(f"         category: {item.category}")
         if item.tags:
             print(f"         tags: {', '.join(item.tags)}")
+        if item.extra_details:
+            print("         extra details from repository manifest")
         if item.install_url:
             print(f"         install: {item.install_url}")
         if item.install_note:
@@ -111,6 +119,9 @@ def cmd_search(args: argparse.Namespace) -> int:
 def cmd_info(args: argparse.Namespace) -> int:
     items, _ = _load(force=args.refresh)
     item = _find(items, args.id)
+    from omastore.enrich import enrich_item
+
+    enrich_item(item)
     if args.readme and not item.readme:
         from omastore.catalog import fetch_readme
 
@@ -209,6 +220,16 @@ def cmd_open(args: argparse.Namespace) -> int:
     return 0 if result.get("ok") else 1
 
 
+def cmd_preview(args: argparse.Namespace) -> int:
+    from omastore.previews import open_preview
+
+    items, _ = _load(force=args.refresh)
+    item = _find(items, args.id)
+    result = open_preview(item)
+    print(result.get("message") or result)
+    return 0 if result.get("ok") else 1
+
+
 def cmd_tui(args: argparse.Namespace) -> int:
     from omastore.app import run_tui
 
@@ -287,6 +308,10 @@ def build_parser() -> argparse.ArgumentParser:
     open_cmd.add_argument("id")
     open_cmd.add_argument("--catalog", action="store_true", help="open the catalog homepage")
     open_cmd.set_defaults(func=cmd_open)
+
+    preview_cmd = sub.add_parser("preview", help="open a catalog or repo screenshot")
+    preview_cmd.add_argument("id")
+    preview_cmd.set_defaults(func=cmd_preview)
     return parser
 
 

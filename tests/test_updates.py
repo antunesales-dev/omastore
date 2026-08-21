@@ -204,3 +204,20 @@ def test_installed_paths(tmp_path: Path, monkeypatch) -> None:
     assert installed_theme_path("lumon") == theme
     assert installed_plugin_path("omarchy-overview") == plugin
     assert installed_theme_path("missing") is None
+
+
+def test_theme_preview_file_prefers_user_copy(tmp_path: Path, monkeypatch) -> None:
+    from omastore import local
+    from omastore.local import theme_preview_file
+
+    monkeypatch.setattr(local, "_home", lambda: tmp_path)
+    monkeypatch.setenv("OMARCHY_PATH", str(tmp_path / "omarchy"))
+    user = tmp_path / ".config" / "omarchy" / "themes" / "tokyo-night"
+    stock = tmp_path / "omarchy" / "themes" / "tokyo-night"
+    user.mkdir(parents=True)
+    stock.mkdir(parents=True)
+    (stock / "preview.png").write_bytes(b"stock")
+    assert theme_preview_file("tokyo-night").read_bytes() == b"stock"
+    (user / "preview.png").write_bytes(b"user")
+    assert theme_preview_file("tokyo-night").read_bytes() == b"user"
+    assert theme_preview_file("missing") is None

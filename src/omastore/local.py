@@ -74,12 +74,39 @@ def installed_plugin_path(plugin_id: str) -> Path | None:
     return _existing_child(user_plugins_dir(), plugin_id)
 
 
+_PREVIEW_NAMES = ("preview.png", "preview.webp", "preview.jpg", "preview.jpeg")
+
+
+def _preview_in(folder: Path | None) -> Path | None:
+    if folder is None or not folder.is_dir():
+        return None
+    for name in _PREVIEW_NAMES:
+        path = folder / name
+        if path.is_file():
+            return path
+    return None
+
+
+def theme_preview_file(slug: str) -> Path | None:
+    """User theme preview first, then the stock Omarchy copy."""
+    found = _preview_in(installed_theme_path(slug))
+    if found:
+        return found
+    return _preview_in(_existing_child(stock_themes_dir(), slug))
+
+
+def plugin_preview_file(plugin_id: str) -> Path | None:
+    return _preview_in(installed_plugin_path(plugin_id))
+
+
 def run_omarchy(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["omarchy", *args],
         check=check,
         text=True,
         capture_output=True,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
     )
 
 

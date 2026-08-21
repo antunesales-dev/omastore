@@ -52,6 +52,17 @@ def test_cycle_status() -> None:
     assert query.status == "installed"
 
 
+def test_themes_sort_installed_before_catalog() -> None:
+    items = [
+        _theme(id="void", name="Void", stars=999),
+        _theme(id="tokyo-night", name="Tokyo Night", stars=1, installed=True, builtin=True),
+        _theme(id="lumon", name="Lumon", stars=2, installed=True, extra=True),
+        _theme(id="spacex", name="Spacex", stars=0, installed=True, extra=True, current=True),
+    ]
+    shown = apply_query(items, Query(sort="stars"), "themes")
+    assert [item.id for item in shown] == ["spacex", "lumon", "tokyo-night", "void"]
+
+
 def test_plugins_sort_installed_then_az() -> None:
     items = [
         Item(kind="plugin", id="z", name="Zebra", installed=False),
