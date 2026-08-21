@@ -8,10 +8,17 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Click
 from textual.screen import ModalScreen
+from textual.strip import Strip
+from textual.style import Style as VisualStyle
+from textual.visual import RenderOptions, Visual
 from textual.widgets import Footer, Input, Markdown, OptionList, Static
 from textual.widgets.option_list import Option
 from rich.cells import set_cell_size
+from rich.segment import Segment
+from rich.style import Style as RichStyle
 from rich.text import Text
+
+from omastore.ansi_image import Cells
 
 from omastore.actions import (
     ActionResult,
@@ -225,6 +232,46 @@ def item_markdown(
     return "\n".join(bits)
 
 
+class ShotVisual(Visual):
+    """Half-block screenshot that does not wrap or lose cell backgrounds."""
+
+    def __init__(self, rows: Cells) -> None:
+        self.rows = rows
+
+    def get_optimal_width(self, rules, container_width: int) -> int:
+        return len(self.rows[0]) if self.rows else 0
+
+    def get_height(self, rules, width: int) -> int:
+        return len(self.rows)
+
+    def render_strips(
+        self,
+        width: int,
+        height: int | None,
+        style: VisualStyle,
+        options: RenderOptions,
+    ) -> list[Strip]:
+        del style, options
+        if not self.rows or width <= 0:
+            return []
+        limit = len(self.rows) if height is None else min(len(self.rows), height)
+        strips: list[Strip] = []
+        for y in range(limit):
+            row = self.rows[y][:width]
+            segments = [
+                Segment(
+                    "▀",
+                    RichStyle(
+                        color=f"#{fg[0]:02x}{fg[1]:02x}{fg[2]:02x}",
+                        bgcolor=f"#{bg[0]:02x}{bg[1]:02x}{bg[2]:02x}",
+                    ),
+                )
+                for fg, bg in row
+            ]
+            strips.append(Strip(segments, len(row)))
+        return strips
+
+
 class ConfirmScreen(ModalScreen[bool]):
     BINDINGS = [
         Binding("y,enter", "yes", "Yes", show=False),
@@ -301,7 +348,7 @@ class OmaStoreApp(App[None]):
         self._highlighted_at = 0.0
         self._about_timer = None
         self._pending_about_key = ""
-        self._shots: dict[str, str] = {}
+        self._shots: dict[str, Cells] = {}
 
     def compose(self) -> ComposeResult:
         yield Vertical(
@@ -608,18 +655,18 @@ class OmaStoreApp(App[None]):
         self._load_about(item.key, fetch_image=not cached, width=width, height=height)
 
     def _shot_pixels(self) -> tuple[int, int]:
-        width = 72
+        width = 56
         try:
             detail = self.query_one("#detail")
-            inner = int(detail.size.width) - 6
-            if inner >= 40:
-                width = max(56, min(80, inner))
+            inner = int(detail.size.width) - 4
+            if inner > 0:
+                width = max(24, min(80, inner))
         except Exception:
             pass
         height = (width * 9) // 16
         if height % 2:
             height += 1
-        height = max(28, min(44, height))
+        height = max(20, min(40, height))
         if height % 2:
             height += 1
         return width, height
@@ -664,9 +711,9 @@ class OmaStoreApp(App[None]):
             palette.update("")
             palette.display = False
         if settled:
-            ansi = self._shots.get(item.key) or ""
-            if ansi and ansi.strip() and ansi.strip() != "no preview":
-                shot.update(Text.from_ansi(ansi))
+            cells = self._shots.get(item.key) or []
+            if cells:
+                shot.update(ShotVisual(cells))
                 shot.display = True
             else:
                 shot.update("")
@@ -688,25 +735,25 @@ class OmaStoreApp(App[None]):
         item = next((row for row in self.items if row.key == key), None)
         if item is None:
             return
-        from omastore.ansi_image import to_ansi
+        from omastore.ansi_image import to_cells
         from omastore.enrich import enrich_item
         from omastore.previews import resolve_preview_path
 
         enrich_item(item)
-        ansi = ""
+        cells: Cells = []
         if fetch_image:
             path = resolve_preview_path(item)
-            ansi = to_ansi(path, width=width, height=height) if path else ""
+            cells = to_cells(path, width=width, height=height) if path else []
         if not item.readme:
             item.readme = fetch_readme(item)
-        self.call_from_thread(self._apply_about, key, ansi, fetch_image)
+        self.call_from_thread(self._apply_about, key, cells, fetch_image)
 
-    def _apply_about(self, key: str, ansi: str, fetch_image: bool = True) -> None:
+    def _apply_about(self, key: str, cells: Cells, fetch_image: bool = True) -> None:
         item = next((row for row in self.items if row.key == key), None)
         if item is None:
             return
         if fetch_image:
-            self._shots[key] = ansi or ""
+            self._shots[key] = cells or []
         if self.selected and self.selected.key == key:
             self._render_detail(item, settled=True)
 

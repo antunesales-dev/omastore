@@ -12,6 +12,8 @@ _WS = b" \t\r\n"
 DEFAULT_WIDTH = 72
 DEFAULT_HEIGHT = 40
 _PAD = "#111111"
+Cell = tuple[tuple[int, int, int], tuple[int, int, int]]
+Cells = list[list[Cell]]
 
 
 def parse_ppm(data: bytes) -> tuple[int, int, list[tuple[int, int, int]]]:
@@ -158,42 +160,73 @@ def _sgr(fg: tuple[int, int, int], bg: tuple[int, int, int]) -> str:
     )
 
 
-def _render_ansi(width: int, height: int, pixels: list[tuple[int, int, int]]) -> str:
-    lines: list[str] = []
+def _hex(rgb: tuple[int, int, int]) -> str:
+    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+def _render_cells(width: int, height: int, pixels: list[tuple[int, int, int]]) -> Cells:
+    rows: Cells = []
     for y in range(0, height, 2):
-        parts: list[str] = []
+        row: list[Cell] = []
         for x in range(width):
             upper = pixels[y * width + x]
             lower = pixels[(y + 1) * width + x] if y + 1 < height else upper
-            parts.append(_sgr(upper, lower))
+            row.append((upper, lower))
+        rows.append(row)
+    return rows
+
+
+def cells_to_ansi(rows: Cells) -> str:
+    lines: list[str] = []
+    for row in rows:
+        parts: list[str] = []
+        for fg, bg in row:
+            parts.append(_sgr(fg, bg))
             parts.append(_HALF_BLOCK)
         parts.append(_RESET)
         lines.append("".join(parts))
     return "\n".join(lines)
 
 
-def to_ansi(path: str | Path, *, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT) -> str:
-    """Render image as unicode half-block ANSI (or a plain fallback message)."""
+def cells_to_rich(rows: Cells):
+    from rich.style import Style
+    from rich.text import Text
+
+    text = Text()
+    for index, row in enumerate(rows):
+        if index:
+            text.append("\n")
+        for fg, bg in row:
+            text.append(_HALF_BLOCK, style=Style(color=_hex(fg), bgcolor=_hex(bg)))
+    return text
+
+
+def to_cells(path: str | Path, *, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT) -> Cells:
+    """Decode an image into half-block cells. Empty list if it cannot be rendered."""
     try:
         image = Path(path)
         if not image.is_file():
-            return NO_PREVIEW
+            return []
         data = _ppm_bytes(image, int(width), int(height))
         if not data:
-            return NO_PREVIEW
+            return []
         ppm_w, ppm_h, pixels = parse_ppm(data)
         if not pixels or ppm_w <= 0 or ppm_h <= 0:
-            return NO_PREVIEW
-        return _render_ansi(ppm_w, ppm_h, pixels) or NO_PREVIEW
+            return []
+        return _render_cells(ppm_w, ppm_h, pixels)
     except Exception:
-        return NO_PREVIEW
+        return []
+
+
+def to_ansi(path: str | Path, *, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT) -> str:
+    """Render image as unicode half-block ANSI (or a plain fallback message)."""
+    rows = to_cells(path, width=width, height=height)
+    return cells_to_ansi(rows) if rows else NO_PREVIEW
 
 
 def to_rich(path: str | Path, *, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT):
-    """Return rich.text.Text for the ANSI preview (or 'no preview')."""
+    """Return rich.text.Text for the preview (or 'no preview')."""
     from rich.text import Text
 
-    try:
-        return Text.from_ansi(to_ansi(path, width=width, height=height))
-    except Exception:
-        return Text(NO_PREVIEW)
+    rows = to_cells(path, width=width, height=height)
+    return cells_to_rich(rows) if rows else Text(NO_PREVIEW)

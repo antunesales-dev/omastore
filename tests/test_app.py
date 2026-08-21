@@ -138,9 +138,9 @@ def test_shot_pixels_are_even_16_by_9() -> None:
     from omastore.app import OmaStoreApp
 
     width, height = OmaStoreApp()._shot_pixels()
-    assert width >= 56
+    assert width >= 24
     assert height % 2 == 0
-    assert 28 <= height <= 44
+    assert 20 <= height <= 40
 
 
 def test_markdown_mentions_extra_details_not_required() -> None:
@@ -207,27 +207,10 @@ def test_action_hints_wrap_onto_two_lines() -> None:
     assert "    " not in packed
 
 
-def _ansi_shot_visible(ansi: str) -> bool:
-    """#shot stays empty for blank ANSI and the 'no preview' placeholder."""
-    return bool(ansi and ansi.strip() and ansi.strip() != "no preview")
-
-
-def test_render_detail_hides_no_preview_text() -> None:
-    import inspect
-
+def test_render_detail_hides_empty_shots() -> None:
     from rich.text import Text
 
-    from omastore.app import OmaStoreApp
-
-    assert _ansi_shot_visible("") is False
-    assert _ansi_shot_visible("no preview") is False
-    assert _ansi_shot_visible("  no preview  ") is False
-    assert _ansi_shot_visible("\n") is False
-    assert _ansi_shot_visible("\x1b[31mhi\x1b[0m") is True
-
-    source = inspect.getsource(OmaStoreApp._render_detail)
-    assert "no preview" in source
-    assert "[p] preview" in action_hints(Item(kind="theme", id="demo", name="Demo"))
+    from omastore.app import OmaStoreApp, ShotVisual
 
     app = OmaStoreApp()
     updates: dict[str, object] = {}
@@ -242,15 +225,18 @@ def test_render_detail_hides_no_preview_text() -> None:
     app.query_one = lambda selector, cls=None: _Stub(selector)  # type: ignore[method-assign]
     item = Item(kind="theme", id="demo", name="Demo")
 
-    for ansi in ("", "no preview", "  no preview  "):
-        app._shots[item.key] = ansi
-        app._render_detail(item, settled=True)
-        assert updates["#shot"] == ""
-
-    app._shots[item.key] = "\x1b[32mok\x1b[0m"
+    app._shots[item.key] = []
     app._render_detail(item, settled=True)
-    assert isinstance(updates["#shot"], Text)
-    assert updates["#shot"].plain  # type: ignore[union-attr]
+    assert updates["#shot"] == ""
+
+    cells = [[((255, 0, 0), (0, 0, 255)), ((0, 255, 0), (255, 255, 255))]]
+    app._shots[item.key] = cells
+    app._render_detail(item, settled=True)
+    visual = updates["#shot"]
+    assert isinstance(visual, ShotVisual)
+    strips = visual.render_strips(2, None, None, None)  # type: ignore[arg-type]
+    assert len(strips) == 1
+    assert strips[0].text == "▀▀"
 
     meta = updates["#meta"]
     assert "[p] preview" in (meta.plain if isinstance(meta, Text) else str(meta))

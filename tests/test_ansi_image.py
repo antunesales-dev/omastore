@@ -66,6 +66,21 @@ def test_to_ansi_without_magick(monkeypatch, tmp_path: Path) -> None:
     assert to_ansi(image) == "no preview"
 
 
+def test_to_cells_from_ppm(monkeypatch, tmp_path: Path) -> None:
+    from omastore.ansi_image import to_cells
+
+    image = tmp_path / "x.png"
+    image.write_bytes(b"not-an-image")
+    monkeypatch.setattr("omastore.ansi_image._ppm_bytes", lambda *_a, **_k: _p6_2x2())
+    cells = to_cells(image, width=2, height=2)
+    assert cells == [
+        [
+            ((255, 0, 0), (0, 0, 255)),
+            ((0, 255, 0), (255, 255, 255)),
+        ]
+    ]
+
+
 def test_to_ansi_half_blocks_from_ppm(monkeypatch, tmp_path: Path) -> None:
     image = tmp_path / "x.png"
     image.write_bytes(b"not-an-image")
