@@ -109,6 +109,23 @@ def clamp_query(query: Query, tab: Tab) -> Query:
     return replace(query, status=status)
 
 
+def reset_filters(query: Query | None = None) -> Query:
+    """Drop status/source/verified/stars filters. Keep free-text search."""
+    text = query.text if query is not None else ""
+    return Query(text=text)
+
+
+def strip_filter_tokens(raw: str) -> str:
+    kept: list[str] = []
+    for token in (raw or "").split():
+        if ":" in token:
+            prefix = token.split(":", 1)[0].lower()
+            if prefix in PREFIXES:
+                continue
+        kept.append(token)
+    return " ".join(kept)
+
+
 def parse_search(raw: str, *, defaults: Query | None = None) -> Query:
     query = defaults or Query()
     text_parts: list[str] = []

@@ -4,9 +4,11 @@ from omastore.app import (
     confirm_prompt,
     filter_bar,
     format_action_hints,
+    format_status,
     item_markdown,
     next_shot_zoom,
     pack_prompt,
+    shot_crop_box,
     palette_text,
     sort_items,
 )
@@ -167,8 +169,42 @@ def test_shot_bar_lists_keys() -> None:
     lines = bar.split("\n")
     assert len(lines) == 2
     assert "[+] in" in lines[1]
-    assert "[o] open file" in lines[1]
+    assert "[arrows] pan" in lines[1]
+    assert "[o] open" in lines[1]
     assert "[esc] close" in lines[1]
+
+
+def test_shot_crop_box_pans_from_center() -> None:
+    assert shot_crop_box(100, 80, 1.0, 0, 0) == (0, 0, 100, 80)
+    assert shot_crop_box(100, 80, 2.0, 0, 0) == (25, 20, 75, 60)
+    left, top, right, bottom = shot_crop_box(100, 80, 2.0, 1.0, 0)
+    assert left == 50 and right == 100
+    left, top, right, bottom = shot_crop_box(100, 80, 2.0, -1.0, -1.0)
+    assert (left, top) == (0, 0)
+    left, top, right, bottom = shot_crop_box(100, 80, 2.0, 1.0, 1.0)
+    assert right == 100 and bottom == 80
+
+
+def test_shot_arrow_bindings_pan() -> None:
+    from omastore.app import ShotScreen
+
+    actions = {binding.action: binding.key for binding in ShotScreen.BINDINGS}
+    assert "left" in actions["pan_left"].split(",")
+    assert "right" in actions["pan_right"].split(",")
+    assert "up" in actions["pan_up"].split(",")
+    assert "down" in actions["pan_down"].split(",")
+    screen = ShotScreen("/tmp/preview.png")
+    screen.zoom = 2.0
+    screen._apply_zoom = lambda: None  # type: ignore[method-assign]
+    screen.action_pan_right()
+    assert screen.pan_x > 0
+    screen.action_pan_left()
+    screen.action_pan_left()
+    assert screen.pan_x < 0
+    screen.action_zoom_fit()
+    assert screen.zoom == 1.0
+    assert screen.pan_x == 0.0
+    assert screen.pan_y == 0.0
 
 
 def test_shots_cache_starts_empty() -> None:
@@ -200,17 +236,35 @@ def test_markdown_mentions_extra_details_not_required() -> None:
 def test_filter_bar_is_readable() -> None:
     assert "is:all" not in filter_bar(Query())
     assert "stars" in filter_bar(Query())
-    assert "f filter" in filter_bar(Query())
+    assert "0 reset" in filter_bar(Query())
     bar = filter_bar(Query(status="installed", sort="name"))
     assert "installed" in bar
     assert "name" in bar
     plugins = filter_bar(Query(), "plugins")
-    assert "f installed" in plugins
-    assert "y verified" in plugins
-    assert "v built-in" in plugins
-    assert "s rating" in plugins
+    assert "0 reset" in plugins
+    assert " y " in plugins or plugins.endswith(" y") or "  y  " in plugins
     not_installed = filter_bar(Query(status="not-installed"), "plugins")
     assert "not installed" in not_installed
+    assert "limehawk" not in filter_bar(Query())
+    assert "HANCORE" not in filter_bar(Query(), "plugins")
+
+
+def test_status_line_skips_credits_and_stays_short() -> None:
+    line = format_status(
+        "304 themes  ·  828 plugins  ·  69 installed",
+        785,
+        trying="Spacex",
+        previous="Spacex",
+        outdated=1,
+    )
+    assert "limehawk" not in line
+    assert "HANCORE" not in line
+    assert "?" not in line
+    assert "trying Spacex" in line
+    assert "[b] back" in line
+    assert "back to Spacex" not in line
+    assert "1 outdated" in line
+    assert "785 shown" in line
 
 
 def test_action_groups_split_do_and_open() -> None:
@@ -383,6 +437,52 @@ def test_search_change_is_debounced() -> None:
     assert rebuilt == []
     app._settle_search()
     assert rebuilt == ["rebuild"]
+
+
+def test_reset_filters_clears_cycles_and_prefixes() -> None:
+    from types import SimpleNamespace
+
+    from omastore.app import OmaStoreApp
+    from omastore.filters import Query
+
+    app = OmaStoreApp()
+    app.search = "clipboard is:installed verified:yes"
+    app.filters = Query(status="installed", source="community", verified="yes", sort="name", min_stars=5)
+    rebuilt: list[str] = []
+    notes: list[str] = []
+    app._rebuild_list = lambda: rebuilt.append("rebuild")  # type: ignore[method-assign]
+    app.notify = lambda message, **_kwargs: notes.append(str(message))  # type: ignore[method-assign]
+    app.query_one = lambda *a, **k: SimpleNamespace(value="clipboard is:installed verified:yes")  # type: ignore[method-assign]
+    app.action_reset_filters()
+    assert app.search == "clipboard"
+    assert app.filters.status == "all"
+    assert app.filters.source == "all"
+    assert app.filters.verified == "all"
+    assert app.filters.sort == "stars"
+    assert app.filters.min_stars == 0
+    assert rebuilt == ["rebuild"]
+    assert notes == ["filters reset"]
+
+
+def test_escape_on_list_resets_filters() -> None:
+    from types import SimpleNamespace
+
+    from omastore.app import OmaStoreApp
+
+    app = OmaStoreApp()
+    reset: list[str] = []
+    app.action_reset_filters = lambda: reset.append("reset")  # type: ignore[method-assign]
+    focused: list[str] = []
+    app.query_one = lambda *a, **k: SimpleNamespace(has_focus=False, focus=lambda: focused.append("list"))  # type: ignore[method-assign]
+    app.action_blur_or_reset()
+    assert reset == ["reset"]
+    assert focused == []
+
+    reset.clear()
+    app.query_one = lambda *a, **k: SimpleNamespace(has_focus=True, focus=lambda: focused.append("list"))  # type: ignore[method-assign]
+    app.action_blur_or_reset()
+    assert reset == []
+    assert focused == ["list"]
 
 
 def test_shot_open_file_uses_path_uri(monkeypatch) -> None:

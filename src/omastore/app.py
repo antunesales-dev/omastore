@@ -24,7 +24,7 @@ from omastore.actions import (
     update,
 )
 from omastore.catalog import fetch_readme, load_store
-from omastore.credits import ABOUT, THEME_STORE_AUTHOR, PLUGIN_STORE_AUTHOR
+from omastore.credits import ABOUT
 from omastore.filters import (
     Query,
     apply_query,
@@ -34,11 +34,12 @@ from omastore.filters import (
     cycle_status,
     cycle_verified,
     parse_search,
+    reset_filters,
+    strip_filter_tokens,
 )
 from omastore.models import Item, Tab
 from omastore.notice import NOTICE
 from omastore.packs import (
-    PACK_CREDIT,
     PACKS,
     Pack,
     describe_pack_install,
@@ -220,7 +221,7 @@ def filter_bar(query: Query, tab: Tab = "themes") -> str:
         rating = f"{query.min_stars}+ stars" if query.min_stars else query.sort
         return (
             f"{status} · {source} · {verified} · {rating}"
-            "     f installed  v built-in  y verified  s rating"
+            "     f  v  y  s  0 reset"
         )
     bits: list[str] = []
     if query.status != "all":
@@ -238,7 +239,27 @@ def filter_bar(query: Query, tab: Tab = "themes") -> str:
     if query.min_stars:
         bits.append(f"{query.min_stars}+ stars")
     bits.append(query.sort)
-    return f"{' · '.join(bits)}     f filter   v source   s sort"
+    return f"{' · '.join(bits)}     f  v  s  0 reset"
+
+
+def format_status(
+    status_text: str,
+    shown: int,
+    *,
+    label: str = "shown",
+    trying: str = "",
+    previous: str = "",
+    outdated: int = 0,
+) -> str:
+    parts = [status_text, f"{shown} {label}"]
+    if trying:
+        extra = f"trying {trying}"
+        if previous:
+            extra += "  [b] back"
+        parts.append(extra)
+    if outdated:
+        parts.append(f"{outdated} outdated")
+    return "  ·  ".join(part for part in parts if part)
 
 
 def palette_text(colors: dict[str, str]) -> Text:
@@ -313,6 +334,7 @@ def item_markdown(
 
 
 SHOT_ZOOMS = (1.0, 1.5, 2.0, 3.0, 4.0)
+SHOT_PAN_STEP = 0.25
 
 
 def next_shot_zoom(current: float, direction: int) -> float:
@@ -326,6 +348,31 @@ def next_shot_zoom(current: float, direction: int) -> float:
         if step < current - 0.01:
             return step
     return SHOT_ZOOMS[0]
+
+
+def clamp_pan(value: float) -> float:
+    return max(-1.0, min(1.0, value))
+
+
+def shot_crop_box(
+    width: int,
+    height: int,
+    zoom: float,
+    pan_x: float = 0.0,
+    pan_y: float = 0.0,
+) -> tuple[int, int, int, int]:
+    """Return (left, top, right, bottom). pan -1 is left/top, 1 is right/bottom."""
+    if width < 1 or height < 1 or zoom <= 1.0:
+        return (0, 0, max(0, width), max(0, height))
+    crop_w = max(1, int(width / zoom))
+    crop_h = max(1, int(height / zoom))
+    max_left = max(0, width - crop_w)
+    max_top = max(0, height - crop_h)
+    left = int(round((clamp_pan(pan_x) + 1) / 2 * max_left))
+    top = int(round((clamp_pan(pan_y) + 1) / 2 * max_top))
+    left = min(max_left, max(0, left))
+    top = min(max_top, max(0, top))
+    return (left, top, left + crop_w, top + crop_h)
 
 
 class NoticeScreen(ModalScreen[str | None]):
@@ -371,6 +418,10 @@ class ShotScreen(ModalScreen[None]):
         Binding("plus,equal", "zoom_in", "Zoom+", show=False),
         Binding("minus", "zoom_out", "Zoom−", show=False),
         Binding("0", "zoom_fit", "Fit", show=False),
+        Binding("left,h", "pan_left", "Left", show=False),
+        Binding("right,l", "pan_right", "Right", show=False),
+        Binding("up,k", "pan_up", "Up", show=False),
+        Binding("down,j", "pan_down", "Down", show=False),
         Binding("o", "open_file", "Open", show=False),
     ]
 
@@ -379,6 +430,8 @@ class ShotScreen(ModalScreen[None]):
         self.path = path
         self.shot_title = title
         self.zoom = 1.0
+        self.pan_x = 0.0
+        self.pan_y = 0.0
 
     def compose(self) -> ComposeResult:
         yield Static(self._bar(), id="shot-bar", markup=False)
@@ -394,21 +447,17 @@ class ShotScreen(ModalScreen[None]):
         if len(name) > room:
             name = name[: room - 1] + "…"
         title = f"{name}{extra}"
-        keys = "[+] in  [-] out  [0] fit  [o] open file  [esc] close"
+        keys = "[+] in  [-] out  [arrows] pan  [0] fit  [o] open  [esc] close"
         return f"{title}\n{keys}"
 
     def _view(self):
         from PIL import Image as PILImage
 
         image = PILImage.open(self.path).convert("RGB")
-        if self.zoom <= 1.0:
+        box = shot_crop_box(*image.size, self.zoom, self.pan_x, self.pan_y)
+        if box == (0, 0, image.size[0], image.size[1]):
             return image
-        width, height = image.size
-        crop_w = max(1, int(width / self.zoom))
-        crop_h = max(1, int(height / self.zoom))
-        left = max(0, (width - crop_w) // 2)
-        top = max(0, (height - crop_h) // 2)
-        return image.crop((left, top, left + crop_w, top + crop_h))
+        return image.crop(box)
 
     def _apply_zoom(self) -> None:
         image = self.query_one("#shot-full", ShotImage)
@@ -418,16 +467,40 @@ class ShotScreen(ModalScreen[None]):
         width = self.size.width or 60
         self.query_one("#shot-bar", Static).update(self._bar(width))
 
+    def _pan(self, dx: float, dy: float) -> None:
+        if self.zoom <= 1.0:
+            self.zoom = next_shot_zoom(self.zoom, 1)
+        self.pan_x = clamp_pan(self.pan_x + dx)
+        self.pan_y = clamp_pan(self.pan_y + dy)
+        self._apply_zoom()
+
+    def action_pan_left(self) -> None:
+        self._pan(-SHOT_PAN_STEP, 0)
+
+    def action_pan_right(self) -> None:
+        self._pan(SHOT_PAN_STEP, 0)
+
+    def action_pan_up(self) -> None:
+        self._pan(0, -SHOT_PAN_STEP)
+
+    def action_pan_down(self) -> None:
+        self._pan(0, SHOT_PAN_STEP)
+
     def action_zoom_in(self) -> None:
         self.zoom = next_shot_zoom(self.zoom, 1)
         self._apply_zoom()
 
     def action_zoom_out(self) -> None:
         self.zoom = next_shot_zoom(self.zoom, -1)
+        if self.zoom <= 1.0:
+            self.pan_x = 0.0
+            self.pan_y = 0.0
         self._apply_zoom()
 
     def action_zoom_fit(self) -> None:
         self.zoom = 1.0
+        self.pan_x = 0.0
+        self.pan_y = 0.0
         self._apply_zoom()
 
     def action_open_file(self) -> None:
@@ -479,7 +552,8 @@ class OmaStoreApp(App[None]):
     CSS_PATH = "app.tcss"
     BINDINGS = [
         Binding("slash", "focus_search", "Search", show=True),
-        Binding("escape", "blur_search", "List", show=False),
+        Binding("escape", "blur_or_reset", "List", show=False),
+        Binding("0", "reset_filters", "Reset", show=False),
         Binding("1", "set_tab('themes')", "Themes", show=False),
         Binding("2", "set_tab('plugins')", "Plugins", show=False),
         Binding("3", "set_tab('installed')", "Installed", show=False),
@@ -590,6 +664,22 @@ class OmaStoreApp(App[None]):
 
     def action_blur_search(self) -> None:
         self.query_one("#list", OptionList).focus()
+
+    def action_blur_or_reset(self) -> None:
+        search = self.query_one("#search", Input)
+        if search.has_focus:
+            self.query_one("#list", OptionList).focus()
+            return
+        self.action_reset_filters()
+
+    def action_reset_filters(self) -> None:
+        self.search = strip_filter_tokens(self.search)
+        self.filters = reset_filters(Query(text=self.search))
+        box = self.query_one("#search", Input)
+        if box.value != self.search:
+            box.value = self.search
+        self._rebuild_list()
+        self.notify("filters reset")
 
     def action_set_tab(self, tab: Tab) -> None:
         self.tab = tab
@@ -855,28 +945,32 @@ class OmaStoreApp(App[None]):
             self._render_detail(None)
         active = self._active_query()
         self.query_one("#filters", Static).update(filter_bar(active, self.tab))
-        extra = ""
+        trying = ""
+        previous_theme = ""
         session = self._try_session
         if session:
             previous_theme = str(session.get("previous") or "")
-            current = str(session.get("current") or "")
-            if not current:
-                current = next(
+            trying = str(session.get("current") or "")
+            if not trying:
+                trying = next(
                     (item.name for item in self.items if item.kind == "theme" and item.current),
                     "",
                 )
-            extra += f"  ·  trying {current}  [b] back to {previous_theme}"
+        outdated = 0
         try:
             from omastore.updates import outdated_items
 
-            n_old = len(outdated_items(self.items))
-            if n_old:
-                extra += f"  ·  {n_old} outdated"
+            outdated = len(outdated_items(self.items))
         except Exception:
             pass
-        credit = f"{THEME_STORE_AUTHOR} · {PLUGIN_STORE_AUTHOR}  ?"
         self.query_one("#status", Static).update(
-            f"{self.status_text}  ·  {len(self.shown)} shown{extra}    {credit}"
+            format_status(
+                self.status_text,
+                len(self.shown),
+                trying=trying,
+                previous=previous_theme,
+                outdated=outdated,
+            )
         )
 
     def _rebuild_packs(self) -> None:
@@ -904,10 +998,9 @@ class OmaStoreApp(App[None]):
             self.selected_pack = None
             self._cancel_about()
             self._render_pack_detail(None)
-        self.query_one("#filters", Static).update(PACK_CREDIT)
-        credit = f"{THEME_STORE_AUTHOR} · {PLUGIN_STORE_AUTHOR}  ?"
+        self.query_one("#filters", Static).update("i install  x remove  / search  0 reset")
         self.query_one("#status", Static).update(
-            f"{self.status_text}  ·  {len(shown_packs)} packs    {credit}"
+            format_status(self.status_text, len(shown_packs), label="packs")
         )
 
     def _select_pack(self, pack: Pack | None) -> None:
