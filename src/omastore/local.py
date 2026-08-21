@@ -54,45 +54,61 @@ def _hidden_ids(entry: object) -> list[str]:
     return ids
 
 
-def hidden_bar_widgets(plugin_id: str, *, path: Path | None = None) -> list[str]:
-    """Read-only: widget ids stashed in this plugin's hiddenEntries. Never writes."""
-    ident = (plugin_id or "").strip()
-    if not ident:
-        return []
+def _read_shell_json(path: Path | None = None) -> dict | None:
     target = path or shell_json_path()
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeError):
-        return []
-    if not isinstance(raw, dict):
-        return []
-    found: list[str] = []
-    seen: set[str] = set()
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _walk_hidden(raw: dict, plugin_id: str | None = None) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    def add(owner: str, hid: str) -> None:
+        if not owner or not hid:
+            return
+        rows = out.setdefault(owner, [])
+        if hid not in rows:
+            rows.append(hid)
+
     layout = raw.get("bar")
     sections = layout.get("layout") if isinstance(layout, dict) else None
+    bags: list[object] = []
     if isinstance(sections, dict):
-        for rows in sections.values():
-            if not isinstance(rows, list):
-                continue
-            for entry in rows:
-                if _layout_entry_id(entry) != ident:
-                    continue
-                for hid in _hidden_ids(entry):
-                    if hid in seen:
-                        continue
-                    seen.add(hid)
-                    found.append(hid)
+        bags.extend(sections.values())
     plugins = raw.get("plugins")
     if isinstance(plugins, list):
-        for entry in plugins:
-            if _layout_entry_id(entry) != ident:
+        bags.append(plugins)
+    for rows in bags:
+        if not isinstance(rows, list):
+            continue
+        for entry in rows:
+            owner = _layout_entry_id(entry)
+            if plugin_id is not None and owner != plugin_id:
                 continue
             for hid in _hidden_ids(entry):
-                if hid in seen:
-                    continue
-                seen.add(hid)
-                found.append(hid)
-    return found
+                add(owner, hid)
+    return out
+
+
+def hidden_bar_widgets(plugin_id: str, *, path: Path | None = None, data: dict | None = None) -> list[str]:
+    """Read-only: widget ids stashed in this plugin's hiddenEntries. Never writes."""
+    ident = (plugin_id or "").strip()
+    if not ident:
+        return []
+    raw = data if isinstance(data, dict) else _read_shell_json(path)
+    if not raw:
+        return []
+    return _walk_hidden(raw, ident).get(ident, [])
+
+
+def hidden_entries_by_plugin(*, path: Path | None = None, data: dict | None = None) -> dict[str, list[str]]:
+    """Read-only map of plugin id -> hiddenEntries widget ids. Never writes."""
+    raw = data if isinstance(data, dict) else _read_shell_json(path)
+    if not raw:
+        return {}
+    return _walk_hidden(raw)
 
 
 HIDDEN_WIDGET_WARN = (

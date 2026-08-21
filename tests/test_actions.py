@@ -47,6 +47,55 @@ def test_timeout_maps_to_omarchy_timed_out(monkeypatch) -> None:
     assert result.message == "omarchy timed out"
 
 
+def test_install_refuses_failed_scan_without_running_omarchy(monkeypatch) -> None:
+    from omastore.scan import Finding, ScanResult
+
+    def fail(*args, **kwargs):
+        raise AssertionError("omarchy should not run when the scan fails")
+
+    monkeypatch.setattr("omastore.actions.run_omarchy", fail)
+    monkeypatch.setattr(
+        "omastore.scan.scan_item",
+        lambda item: ScanResult(
+            item_key=item.key,
+            item_id=item.id,
+            item_name=item.name,
+            kind=item.kind,
+            repo=item.repo or "",
+            verdict="block",
+            findings=[Finding("block", "fetch", "", None, "scan failed: boom")],
+            source="failed",
+            error="boom",
+        ),
+    )
+    result = install(_plugin())
+    assert result.ok is False
+    assert "scan failed" in result.message
+
+
+def test_install_accept_scan_risks_still_runs_after_hits(monkeypatch) -> None:
+    from omastore.scan import Finding, ScanResult
+
+    class _Ok:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    monkeypatch.setattr("omastore.actions.run_omarchy", lambda *a, **k: _Ok())
+    dirty = ScanResult(
+        item_key="plugin:foo",
+        item_id="foo",
+        item_name="Foo",
+        kind="plugin",
+        repo="https://github.com/example/foo",
+        verdict="block",
+        findings=[Finding("block", "network", "a.qml", 1, "fetch(")],
+        source="tree",
+    )
+    result = install(_plugin(), scan_result=dirty, accept_scan_risks=True)
+    assert result.ok is True
+
+
 def test_install_refuses_disallowed_url(monkeypatch) -> None:
     def fail(*args, **kwargs):
         raise AssertionError("omarchy should not run for a refused install url")
@@ -66,7 +115,7 @@ def test_install_refuses_disallowed_url(monkeypatch) -> None:
 def test_install_pack_stops_on_failure(monkeypatch) -> None:
     calls: list[str] = []
 
-    def fake_install(item, *, dry_run=False):
+    def fake_install(item, *, dry_run=False, **_kwargs):
         calls.append(item.id)
         if item.id == "b":
             return ActionResult(False, [], "", "boom")
@@ -87,7 +136,7 @@ def test_install_pack_skips_already_installed(monkeypatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(
         "omastore.actions.install",
-        lambda item, *, dry_run=False: calls.append(item.id) or ActionResult(True, [], "ok", ""),
+        lambda item, *, dry_run=False, **_kwargs: calls.append(item.id) or ActionResult(True, [], "ok", ""),
     )
     have = _plugin(id="have", name="Have", installed=True)
     open_ = _plugin(id="open", name="Open")

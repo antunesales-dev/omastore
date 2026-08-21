@@ -194,6 +194,25 @@ Footer {
     align: center middle;
 }
 
+#scan-status {
+    width: 60;
+    height: auto;
+    padding: 2 3;
+    background: #1a1a1a;
+    border: tall #7dcea0;
+    align: center middle;
+}
+
+#findings {
+    width: 72;
+    height: auto;
+    max-height: 90%;
+    padding: 2 3;
+    background: #1a1a1a;
+    border: tall #e0af68;
+    align: center middle;
+}
+
 #notice {
     width: 64;
     height: auto;

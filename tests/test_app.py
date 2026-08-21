@@ -409,6 +409,54 @@ def test_confirm_screen_disables_markup() -> None:
     assert "[y] yes   [n] no" in str(static._Static__content)
 
 
+def test_act_install_scans_first() -> None:
+    from omastore.app import ScanScreen, OmaStoreApp
+
+    pushed: list[object] = []
+    ran: list[str] = []
+    app = OmaStoreApp()
+    app.push_screen = lambda screen, callback=None: pushed.append(screen)  # type: ignore[method-assign]
+    app._run_action = lambda name, item, **kwargs: ran.append(name)  # type: ignore[method-assign]
+    app.selected = Item(
+        kind="plugin",
+        id="x",
+        name="X",
+        install_url="https://github.com/a/x",
+        repo="https://github.com/a/x",
+    )
+    app._act("install")
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], ScanScreen)
+    assert ran == []
+
+
+def test_findings_screen_abort_is_default() -> None:
+    from omastore.app import FindingsScreen
+    from omastore.scan import Finding, ScanResult
+
+    item = Item(kind="plugin", id="x", name="X", repo="https://github.com/a/x")
+    result = ScanResult(
+        item_key="plugin:x",
+        item_id="x",
+        item_name="X",
+        kind="plugin",
+        repo=item.repo,
+        verdict="block",
+        findings=[Finding("block", "network", "main.qml", 2, "fetch(")],
+        source="tree",
+    )
+    screen = FindingsScreen(result, item)
+    static = next(screen.compose())
+    assert static._render_markup is False
+    assert "[n] abort (default)" in str(static._Static__content)
+    assert "[r] report" in str(static._Static__content)
+    assert "[i] install anyway" in str(static._Static__content)
+    keys = ",".join(binding.key for binding in screen.BINDINGS)
+    assert "enter" in keys
+    abort = next(binding.action for binding in screen.BINDINGS if "enter" in binding.key.split(","))
+    assert abort == "abort"
+
+
 def test_act_confirms_enable_not_apply_or_disable() -> None:
     from omastore.app import ConfirmScreen, OmaStoreApp
 
@@ -625,8 +673,8 @@ def test_pack_click_never_installs() -> None:
     assert acts == ["pack"]
 
 
-def test_act_pack_confirms_all_members() -> None:
-    from omastore.app import ConfirmScreen, OmaStoreApp
+def test_act_pack_scans_before_confirm() -> None:
+    from omastore.app import ScanScreen, OmaStoreApp
     from omastore.packs import get_pack
 
     app = OmaStoreApp()
@@ -647,13 +695,10 @@ def test_act_pack_confirms_all_members() -> None:
     pushed: list[object] = []
     ran: list[object] = []
     app.push_screen = lambda screen, callback=None: pushed.append(screen)  # type: ignore[method-assign]
-    app._run_pack_install = lambda *args: ran.append(args)  # type: ignore[method-assign]
+    app._run_pack_install = lambda *args, **kwargs: ran.append(args)  # type: ignore[method-assign]
     app._act_pack()
     assert len(pushed) == 1
-    assert isinstance(pushed[0], ConfirmScreen)
-    assert "Stocks" in pushed[0].prompt
-    assert "https://github.com/a/stocks" in pushed[0].prompt
-    assert "HANCORE" in pushed[0].prompt
+    assert isinstance(pushed[0], ScanScreen)
     assert ran == []
 
 

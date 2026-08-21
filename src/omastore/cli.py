@@ -137,6 +137,40 @@ def cmd_info(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_confirm(item: Item, name: str) -> None:
+    print(item.key)
+    if item.repo:
+        print(item.repo)
+    if item.verification_label:
+        print(item.verification_label)
+    for warning in item.warnings:
+        print(warning)
+    if name == "remove" and item.kind == "plugin":
+        from omastore.local import layout_remove_warnings
+
+        for warning in layout_remove_warnings(item.id):
+            print(warning)
+    print("pass --yes to proceed")
+
+
+def _scan_for_install(item: Item, args: argparse.Namespace, *, pack_id: str = ""):
+    from omastore.scan import ScanResult, scan_item
+
+    print("checking repo…", file=sys.stderr)
+    result: ScanResult = scan_item(item)
+    accept = bool(getattr(args, "accept_scan_risks", False))
+    if result.allows_install(accept):
+        return result, 0
+    if pack_id:
+        print(f"{pack_id} blocked at {result.item_key}")
+    print(result.format_full())
+    if result.source == "failed" or result.error:
+        print("scan failed; install refused (fail closed)")
+    else:
+        print("pass --yes --i-accept-scan-risks to proceed anyway")
+    return result, 2
+
+
 def _act(args: argparse.Namespace, name: str) -> int:
     items, _ = _load(force=args.refresh)
     item = _find(items, args.id)
@@ -151,23 +185,24 @@ def _act(args: argparse.Namespace, name: str) -> int:
     if not allowed.get(name):
         print(f"cannot {name} {item.key}")
         return 1
+    scan_result = None
+    if name == "install":
+        scan_result, code = _scan_for_install(item, args)
+        if code != 0:
+            return code
     if name in {"install", "remove", "update", "enable"} and not args.yes and not args.dry_run:
-        print(item.key)
-        if item.repo:
-            print(item.repo)
-        if item.verification_label:
-            print(item.verification_label)
-        for warning in item.warnings:
-            print(warning)
-        if name == "remove" and item.kind == "plugin":
-            from omastore.local import layout_remove_warnings
-
-            for warning in layout_remove_warnings(item.id):
-                print(warning)
-        print("pass --yes to proceed")
+        _print_confirm(item, name)
         return 2
+    if name == "install":
+        result = install(
+            item,
+            dry_run=args.dry_run,
+            scan_result=scan_result,
+            accept_scan_risks=bool(getattr(args, "accept_scan_risks", False)),
+        )
+        print(result.message)
+        return 0 if result.ok else 1
     runners = {
-        "install": install,
         "apply": apply_theme,
         "enable": enable_plugin,
         "disable": disable_plugin,
@@ -307,6 +342,7 @@ def cmd_pack_show(args: argparse.Namespace, pack_id: str) -> int:
 def cmd_pack_install(args: argparse.Namespace, pack_id: str) -> int:
     from omastore.actions import install_pack
     from omastore.packs import describe_pack_install, get_pack
+    from omastore.scan import first_issue, scan_items
 
     pack = get_pack(pack_id)
     if pack is None:
@@ -317,12 +353,36 @@ def cmd_pack_install(args: argparse.Namespace, pack_id: str) -> int:
     if not pending:
         print("nothing to install")
         return 0
+    print("checking repo…", file=sys.stderr)
+    scans = scan_items(pending)
+    issue = first_issue(scans)
+    accept = bool(getattr(args, "accept_scan_risks", False))
+    if issue is not None:
+        blocked = [row for row in scans if not row.allows_install(accept)]
+        if blocked:
+            first = blocked[0]
+            print(f"{pack.id} blocked at {first.item_key}")
+            print(first.format_full())
+            extra = [row for row in blocked[1:]]
+            if extra:
+                print(f"{len(extra)} more plugin(s) also had findings")
+            if any(row.source == "failed" or row.error for row in blocked):
+                print("scan failed; pack install refused (fail closed)")
+            else:
+                print("pass --yes --i-accept-scan-risks to proceed anyway")
+            return 2
     if not args.yes and not args.dry_run:
         print(describe_pack_install(pack, pending))
         print("pass --yes to proceed")
         return 2
     failed = False
-    for item, result in install_pack(pending, dry_run=args.dry_run):
+    by_key = {row.item_key: row for row in scans}
+    for item, result in install_pack(
+        pending,
+        dry_run=args.dry_run,
+        accept_scan_risks=accept,
+        scans=by_key,
+    ):
         print(f"{item.key}: {result.message}")
         if not result.ok:
             failed = True
@@ -365,6 +425,24 @@ def cmd_pack(args: argparse.Namespace) -> int:
     return cmd_pack_show(args, args.target)
 
 
+def cmd_mcp(_args: argparse.Namespace) -> int:
+    from omastore.mcp import run_stdio
+
+    run_stdio()
+    return 0
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    from omastore.scan import scan_item
+
+    items, _ = _load(force=args.refresh)
+    item = _find(items, args.id)
+    print("checking repo…", file=sys.stderr)
+    result = scan_item(item)
+    print(result.format_full())
+    return 0 if result.verdict == "clean" else 2
+
+
 def cmd_tui(args: argparse.Namespace) -> int:
     from omastore.app import run_tui
 
@@ -381,7 +459,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"omastore {__version__}")
     parser.add_argument("--refresh", action="store_true", help="ignore cached catalogs")
     parser.add_argument("--dry-run", action="store_true", help="print omarchy commands without running them")
-    parser.add_argument("--yes", action="store_true", help="confirm install/remove/update")
+    parser.add_argument("--yes", action="store_true", help="confirm install/remove/update (does not skip a failed pre-install scan)")
+    parser.add_argument(
+        "--i-accept-scan-risks",
+        dest="accept_scan_risks",
+        action="store_true",
+        help="install despite pre-install scan findings; ignored if the scan itself failed",
+    )
     sub = parser.add_subparsers(dest="cmd")
 
     tui = sub.add_parser("tui", help="open the store TUI (default)")
@@ -456,6 +540,13 @@ def build_parser() -> argparse.ArgumentParser:
     pack.add_argument("target", help="pack id, or install/remove")
     pack.add_argument("id", nargs="?", help="pack id when using install or remove")
     pack.set_defaults(func=cmd_pack)
+
+    mcp = sub.add_parser("mcp", help="stdio MCP server to browse and audit catalogs (read-only unless OMASTORE_MCP_ALLOW_MUTATE=1)")
+    mcp.set_defaults(func=cmd_mcp)
+
+    scan = sub.add_parser("scan", help="static pre-install scan of a theme or plugin (never executes it)")
+    scan.add_argument("id")
+    scan.set_defaults(func=cmd_scan)
     return parser
 
 

@@ -28,7 +28,7 @@ It is meant to stay simple.
 2. Type `/` and search, or press `1` / `2` / `3` / `4` for themes, plugins, installed, or suggested packs.
 3. Filter with `f` (installed / available / extra / stock), `v` (community / built-in), and `s` (stars / name / recent). You can also type prefixes in the search box: `hue:blue`, `tag:bar`, `is:available`, `src:community`.
 4. Installed themes show a filled **●** (green if it is the current theme, cyan otherwise) and sort above catalog-only rows. Plugin rows show a green **✓** when the HANCORE catalog verified them, or a yellow **−** when they are unverified. On the plugins tab, `f` is installed / not installed, `v` is community / built-in, `y` is verified / unverified, and `s` sorts by rating. You can also type `is:installed`, `is:not-installed`, `src:builtin`, `verified:yes`, `stars:10`.
-5. Press `enter` (or `i`) to install. omastore asks first, then runs the official `omarchy` command. Packs are hand-picked verified plugins from the HANCORE catalog (Everyday, Developer, Finance, Designer, Music, Artist, Gamer), not a keyword dump and not a new store. In a pack, **●** is already installed and **○** is still to install. `i` confirms every remaining plugin, then installs them one by one. `x` confirms every installed member, then removes them one by one. A plugin that also sits in another pack is still removed.
+5. Press `enter` (or `i`) to install. omastore first scans a copy of the repo without running it (`checking repo…`). Clean listings get the usual confirm (repo, verified, catalog warnings), then the official `omarchy` command. Hits stop the install: abort, open a prefilled report draft, or install anyway after a second confirm. Packs are hand-picked verified plugins from the HANCORE catalog (Everyday, Developer, Finance, Designer, Music, Artist, Gamer), not a keyword dump and not a new store. In a pack, **●** is already installed and **○** is still to install. `i` scans every remaining plugin, confirms if they are all clean, then installs them one by one. A blocked member fails the whole pack. `x` confirms every installed member, then removes them one by one. A plugin that also sits in another pack is still removed.
 
 You do not browse a new store. You browse **their** catalogs, then Omarchy does the install. How we relate to those projects is in [COMMUNITY.md](COMMUNITY.md).
 
@@ -83,7 +83,9 @@ omastore tui --tab packs
 omastore packs                    # list suggested plugin packs
 omastore pack everyday            # show the Everyday pack
 omastore pack install everyday --yes
+omastore pack install everyday --yes --i-accept-scan-risks
 omastore pack remove everyday --yes
+omastore scan plugin:omarchy-overview
 omastore search lumon
 omastore search overview --kind plugin
 omastore search hue:blue is:available --sort stars
@@ -99,10 +101,34 @@ omastore info theme:lumon --readme
 omastore install theme:lumon
 omastore apply lumon
 omastore install plugin:omarchy-overview
+omastore install plugin:omarchy-overview --yes
+omastore install plugin:omarchy-overview --yes --i-accept-scan-risks
 omastore remove plugin:omarchy-overview
 omastore list --installed
 omastore refresh
 omastore about
+omastore mcp                      # stdio MCP (browse/audit; mutate off unless OMASTORE_MCP_ALLOW_MUTATE=1)
+```
+
+### MCP (agents)
+
+`omastore mcp` is a stdio MCP server over the **same** limehawk and HANCORE catalogs. It is an agent client, not a new store.
+
+Read-only tools: `search`, `info`, `installed`, `packs`, `pack`, `audit`, `hidden_widgets`, `scan`.
+
+Install/remove/enable/disable are **not registered** unless `OMASTORE_MCP_ALLOW_MUTATE=1`. Even then they require `confirm: true` and use official `omarchy` commands. Install also runs the no-execute scan; `confirm` is not enough when the scan reports issues (`accept_scan_risks`), and a failed scan cannot be overridden. They never execute catalog `installCommand` strings.
+
+Example Cursor/Claude config:
+
+```json
+{
+  "mcpServers": {
+    "omastore": {
+      "command": "omastore",
+      "args": ["mcp"]
+    }
+  }
+}
 ```
 
 ### TUI keys
@@ -140,7 +166,11 @@ Catalogs cache under `~/.cache/omastore/` for six hours. `omastore refresh` fetc
 
 ## Safety
 
-Community themes and plugins are third-party code. Plugins run unsandboxed inside `omarchy-shell`. omastore shows the repo, verification status, and any catalog warnings, then calls:
+Community themes and plugins are third-party code. Plugins run unsandboxed inside `omarchy-shell`. omastore is not a sandbox, and a clean scan is not proof of safety. HANCORE's verified badge is a signal; we still scan.
+
+Before `omarchy plugin add` / `omarchy theme install`, omastore fetches a GitHub archive or a hookless shallow clone to a temp dir, then statically audits it (manifest vs files, network, process, secrets/paths, obfuscation). It never imports QML and never runs `qmlscene`. If the fetch or parse fails, install is refused (fail closed). `--yes` alone does not skip a failed scan; `--i-accept-scan-risks` only covers pattern hits, not a crashed scan.
+
+Findings can be turned into a **draft** GitHub issue (HANCORE listing repo and/or the plugin repo). omastore never POSTs that issue.
 
 ```bash
 omarchy theme install <url>

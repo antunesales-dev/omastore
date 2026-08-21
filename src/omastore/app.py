@@ -48,6 +48,14 @@ from omastore.packs import (
     pack_markdown,
     pack_matches,
 )
+from omastore.scan import (
+    ScanResult,
+    anyway_prompt,
+    findings_prompt,
+    first_issue,
+    open_report,
+    scan_item,
+)
 from omastore.theme import omarchy_theme_css
 
 PALETTE_KEYS = [
@@ -408,6 +416,111 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def action_no(self) -> None:
         self.dismiss(False)
+
+
+class ScanScreen(ModalScreen[list[ScanResult] | None]):
+    BINDINGS = [
+        Binding("n,escape", "abort", "Abort", show=False),
+    ]
+
+    def __init__(self, items: list[Item]) -> None:
+        super().__init__()
+        self.items = items
+        self._cancelled = False
+        self._status = "checking repo…"
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._status, id="scan-status", markup=False)
+
+    def on_mount(self) -> None:
+        self.run_worker(self._scan, thread=True, exclusive=True)
+
+    def set_status(self, text: str) -> None:
+        self._status = text
+        try:
+            self.query_one("#scan-status", Static).update(text)
+        except Exception:
+            return
+
+    def _scan(self) -> None:
+        results: list[ScanResult] = []
+        try:
+            for index, item in enumerate(self.items, 1):
+                if self._cancelled:
+                    return
+                if len(self.items) > 1:
+                    message = f"checking repo… {item.name} ({index}/{len(self.items)})"
+                else:
+                    message = "checking repo…"
+                self.app.call_from_thread(self._safe_status, message)
+                results.append(scan_item(item))
+            if not self._cancelled:
+                self.app.call_from_thread(self._finish, results)
+        except Exception as exc:
+            failed = ScanResult(
+                item_key=self.items[0].key if self.items else "",
+                item_id=self.items[0].id if self.items else "",
+                item_name=self.items[0].name if self.items else "",
+                kind=self.items[0].kind if self.items else "plugin",
+                repo="",
+                verdict="block",
+                source="failed",
+                error=str(exc).strip() or exc.__class__.__name__,
+            )
+            self.app.call_from_thread(self._finish, [failed])
+
+    def _safe_status(self, text: str) -> None:
+        if self._cancelled or not self.is_mounted:
+            return
+        self.set_status(text)
+
+    def _finish(self, results: list[ScanResult]) -> None:
+        if self._cancelled or not self.is_mounted:
+            return
+        self.dismiss(results)
+
+    def action_abort(self) -> None:
+        self._cancelled = True
+        self.dismiss(None)
+
+
+class FindingsScreen(ModalScreen[str | None]):
+    BINDINGS = [
+        Binding("n,escape,a,enter", "abort", "Abort", show=False),
+        Binding("r", "report", "Report", show=False),
+        Binding("i", "anyway", "Install anyway", show=False),
+    ]
+
+    def __init__(
+        self,
+        result: ScanResult,
+        item: Item,
+        *,
+        extra: str = "",
+        allow_anyway: bool = True,
+    ) -> None:
+        super().__init__()
+        self.result = result
+        self.item = item
+        self.extra = extra
+        self.allow_anyway = allow_anyway
+        self.prompt = findings_prompt(result, item, extra=extra, allow_anyway=allow_anyway)
+
+    def compose(self) -> ComposeResult:
+        yield Static(self.prompt, id="findings", markup=False)
+
+    def action_abort(self) -> None:
+        self.dismiss("abort")
+
+    def action_report(self) -> None:
+        opened = open_report(self.item, self.result)
+        self.notify(opened["message"])
+
+    def action_anyway(self) -> None:
+        if not self.allow_anyway:
+            self.notify("scan failed; install is refused (fail closed)", severity="error")
+            return
+        self.dismiss("anyway")
 
 
 class ShotScreen(ModalScreen[None]):
@@ -1197,7 +1310,10 @@ class OmaStoreApp(App[None]):
         }
         if not allowed.get(name):
             return
-        if name in {"install", "remove", "update", "enable"}:
+        if name == "install":
+            self._scan_then_install(item)
+            return
+        if name in {"remove", "update", "enable"}:
 
             def confirmed(ok: bool | None, action=name, target=item) -> None:
                 if ok:
@@ -1207,19 +1323,104 @@ class OmaStoreApp(App[None]):
             return
         self._run_action(name, item)
 
+    def _scan_then_install(self, item: Item) -> None:
+        def scanned(results: list[ScanResult] | None, target=item) -> None:
+            if not results:
+                return
+            result = results[0]
+            if result.verdict == "clean":
+                def confirmed(ok: bool | None, scan=result, plugin=target) -> None:
+                    if ok:
+                        self._run_action("install", plugin, scan_result=scan)
+
+                self.push_screen(ConfirmScreen(confirm_prompt("install", target)), confirmed)
+                return
+            allow = result.allows_install(True)
+
+            def decided(choice: str | None, scan=result, plugin=target, can_anyway=allow) -> None:
+                if choice != "anyway" or not can_anyway:
+                    return
+
+                def sure(ok: bool | None, accepted=scan, plugin_item=plugin) -> None:
+                    if ok:
+                        self._run_action(
+                            "install",
+                            plugin_item,
+                            scan_result=accepted,
+                            accept_scan_risks=True,
+                        )
+
+                self.push_screen(ConfirmScreen(anyway_prompt(scan, plugin)), sure)
+
+            self.push_screen(FindingsScreen(result, target, allow_anyway=allow), decided)
+
+        self.push_screen(ScanScreen([item]), scanned)
+
     def _act_pack(self, name: str = "install") -> None:
         pack = self.selected_pack
         if pack is None:
             return
         if name == "install":
             rows = pack.pending(self.items)
-            prompt = describe_pack_install
-            runner = self._run_pack_install
             empty = f"{pack.title}: nothing to install"
-        elif name == "remove":
+            if not rows:
+                self.notify(empty)
+                return
+
+            def scanned(results: list[ScanResult] | None, target=pack, members=rows) -> None:
+                if results is None:
+                    return
+                scans = {row.item_key: row for row in results}
+                issue = first_issue(results)
+                if issue is None:
+                    def confirmed(ok: bool | None, pack_obj=target, pending=members, by_key=scans) -> None:
+                        if ok:
+                            self._run_pack_install(pack_obj, pending, scans=by_key)
+
+                    self.push_screen(ConfirmScreen(describe_pack_install(target, members)), confirmed)
+                    return
+                plugin = next((row for row in members if row.key == issue.item_key), members[0])
+                dirty = sum(1 for row in results if row.verdict != "clean")
+                extra = f"{target.title} stopped at {plugin.name}"
+                if dirty > 1:
+                    extra += f" ({dirty} plugins had findings)"
+                allow = issue.allows_install(True) and all(
+                    row.allows_install(True) for row in results if row.verdict != "clean"
+                )
+
+                def decided(
+                    choice: str | None,
+                    pack_obj=target,
+                    pending=members,
+                    by_key=scans,
+                    blocked=issue,
+                    plugin_item=plugin,
+                    note=extra,
+                    can_anyway=allow,
+                ) -> None:
+                    if choice != "anyway" or not can_anyway:
+                        return
+
+                    def sure(ok: bool | None) -> None:
+                        if ok:
+                            self._run_pack_install(
+                                pack_obj,
+                                pending,
+                                scans=by_key,
+                                accept_scan_risks=True,
+                            )
+
+                    self.push_screen(ConfirmScreen(anyway_prompt(blocked, plugin_item, extra=note)), sure)
+
+                self.push_screen(
+                    FindingsScreen(issue, plugin, extra=extra, allow_anyway=allow),
+                    decided,
+                )
+
+            self.push_screen(ScanScreen(rows), scanned)
+            return
+        if name == "remove":
             rows = pack.removable(self.items)
-            prompt = describe_pack_remove
-            runner = self._run_pack_remove
             empty = f"{pack.title}: nothing to remove"
         else:
             return
@@ -1227,15 +1428,21 @@ class OmaStoreApp(App[None]):
             self.notify(empty)
             return
 
-        def confirmed(ok: bool | None, target=pack, members=rows, run=runner) -> None:
+        def confirmed(ok: bool | None, target=pack, members=rows) -> None:
             if ok:
-                run(target, members)
+                self._run_pack_remove(target, members)
 
-        self.push_screen(ConfirmScreen(prompt(pack, rows)), confirmed)
+        self.push_screen(ConfirmScreen(describe_pack_remove(pack, rows)), confirmed)
 
     @work(thread=True, exclusive=True, group="action")
-    def _run_pack_install(self, pack: Pack, pending: list[Item]) -> None:
-        results = install_pack(pending)
+    def _run_pack_install(
+        self,
+        pack: Pack,
+        pending: list[Item],
+        scans: dict[str, ScanResult] | None = None,
+        accept_scan_risks: bool = False,
+    ) -> None:
+        results = install_pack(pending, scans=scans, accept_scan_risks=accept_scan_risks)
         self.call_from_thread(self._pack_action_done, pack, "install", results)
 
     @work(thread=True, exclusive=True, group="action")
@@ -1263,16 +1470,18 @@ class OmaStoreApp(App[None]):
         self.load_items()
 
     @work(thread=True, exclusive=True, group="action")
-    def _run_action(self, name: str, item: Item) -> None:
-        runners = {
-            "install": install,
-            "apply": apply_theme,
-            "enable": enable_plugin,
-            "disable": disable_plugin,
-            "update": update,
-            "remove": remove,
-        }
-        result: ActionResult = runners[name](item)
+    def _run_action(self, name: str, item: Item, **kwargs) -> None:
+        if name == "install":
+            result = install(item, **kwargs)
+        else:
+            runners = {
+                "apply": apply_theme,
+                "enable": enable_plugin,
+                "disable": disable_plugin,
+                "update": update,
+                "remove": remove,
+            }
+            result = runners[name](item)
         self.call_from_thread(self._action_done, name, item, result)
 
     def _action_done(self, name: str, item: Item, result: ActionResult) -> None:

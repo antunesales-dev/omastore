@@ -17,6 +17,7 @@ FETCH_TIMEOUT = 20
 ALLOWED_FETCH_HOSTS = {
     "raw.githubusercontent.com",
     "github.com",
+    "codeload.github.com",
     "objects.githubusercontent.com",
     "user-attachments.githubusercontent.com",
     "camo.githubusercontent.com",

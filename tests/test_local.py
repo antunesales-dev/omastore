@@ -114,6 +114,28 @@ def test_hidden_bar_widgets_corrupt_or_missing(tmp_path: Path) -> None:
     assert layout_remove_warnings("x", path=bad) == []
 
 
+def test_hidden_entries_by_plugin(tmp_path: Path) -> None:
+    from omastore.local import hidden_entries_by_plugin
+
+    shell = tmp_path / "shell.json"
+    shell.write_text(
+        json.dumps(
+            {
+                "bar": {
+                    "layout": {
+                        "right": [
+                            {"id": "hider", "hiddenEntries": [{"id": "omarchy.clock"}, "omarchy.audio"]},
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    mapping = hidden_entries_by_plugin(path=shell)
+    assert mapping == {"hider": ["omarchy.clock", "omarchy.audio"]}
+
+
 def test_restore_hidden_bar_widgets_puts_them_back(tmp_path: Path) -> None:
     shell = tmp_path / "shell.json"
     payload = {
