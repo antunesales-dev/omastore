@@ -85,6 +85,52 @@ def list_prompt(item: Item, width: int = 40) -> Text:
     return text
 
 
+def action_hints(item: Item) -> list[str]:
+    actions: list[str] = []
+    if item.can_install:
+        actions.append("[i] install")
+    if item.kind == "theme":
+        if item.installed:
+            actions.append("[t] try")
+        actions.append("[b] back")
+    if item.can_apply:
+        actions.append("[a] apply")
+    if item.can_enable:
+        actions.append("[e] enable")
+    if item.can_disable:
+        actions.append("[d] disable")
+    if item.can_update:
+        actions.append("[u] update")
+    if item.can_remove:
+        actions.append("[x] remove")
+    actions.append("[o] repo")
+    actions.append("[c] catalog")
+    actions.append("[p] preview")
+    return actions
+
+
+def format_action_hints(actions: list[str], width: int = 48) -> str:
+    """Pack key hints onto one or two short lines."""
+    if not actions:
+        return ""
+    width = max(24, int(width))
+    lines: list[str] = []
+    current: list[str] = []
+    size = 0
+    for action in actions:
+        extra = len(action) + (2 if current else 0)
+        if current and size + extra > width:
+            lines.append("  ".join(current))
+            current = [action]
+            size = len(action)
+        else:
+            current.append(action)
+            size += extra
+    if current:
+        lines.append("  ".join(current))
+    return "\n".join(lines)
+
+
 def palette_text(colors: dict[str, str]) -> Text:
     text = Text()
     seen: set[str] = set()
@@ -569,26 +615,6 @@ class OmaStoreApp(App[None]):
             shot.display = False
             readme.update("_Try another search or switch tabs._")
             return
-        actions = []
-        if item.can_install:
-            actions.append("[i] install")
-        if item.kind == "theme":
-            if item.installed:
-                actions.append("[t] try")
-            actions.append("[b] back")
-        if item.can_apply:
-            actions.append("[a] apply")
-        actions.append("[o] repo")
-        actions.append("[c] catalog")
-        actions.append("[p] preview")
-        if item.can_enable:
-            actions.append("[e] enable")
-        if item.can_disable:
-            actions.append("[d] disable")
-        if item.can_update:
-            actions.append("[u] update")
-        if item.can_remove:
-            actions.append("[x] remove")
         header = Text()
         header.append(item.name, style="bold")
         header.append("\n\n")
@@ -598,9 +624,15 @@ class OmaStoreApp(App[None]):
             if part
         )
         header.append(subtitle or item.kind, style="dim")
+        actions = action_hints(item)
         if actions:
+            pane_width = 48
+            try:
+                pane_width = max(32, int(self.query_one("#detail").size.width) - 8)
+            except Exception:
+                pass
             header.append("\n\n")
-            header.append("    ".join(actions), style="bold")
+            header.append(format_action_hints(actions, width=pane_width), style="bold")
         meta.update(header)
         palette.update(palette_text(item.colors) if item.colors else Text(""))
         if settled:

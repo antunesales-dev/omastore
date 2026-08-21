@@ -1,4 +1,4 @@
-from omastore.app import item_markdown, palette_text, sort_items
+from omastore.app import action_hints, format_action_hints, item_markdown, palette_text, sort_items
 from omastore.models import Item
 
 
@@ -154,6 +154,26 @@ def test_markdown_mentions_extra_details_not_required() -> None:
         assert "MIT" in md
 
 
+def test_action_hints_wrap_onto_two_lines() -> None:
+    item = Item(
+        kind="theme",
+        id="lumon",
+        name="Lumon",
+        installed=True,
+        extra=True,
+        install_url="https://github.com/example/lumon",
+    )
+    hints = action_hints(item)
+    assert "[t] try" in hints
+    assert "[p] preview" in hints
+    packed = format_action_hints(hints, width=40)
+    assert "\n" in packed
+    lines = packed.split("\n")
+    assert 2 <= len(lines) <= 3
+    assert all(len(line) <= 48 for line in lines)
+    assert "    " not in packed
+
+
 def _ansi_shot_visible(ansi: str) -> bool:
     """#shot stays empty for blank ANSI and the 'no preview' placeholder."""
     return bool(ansi and ansi.strip() and ansi.strip() != "no preview")
@@ -173,8 +193,8 @@ def test_render_detail_hides_no_preview_text() -> None:
     assert _ansi_shot_visible("\x1b[31mhi\x1b[0m") is True
 
     source = inspect.getsource(OmaStoreApp._render_detail)
-    assert "[p] preview" in source
     assert "no preview" in source
+    assert "[p] preview" in action_hints(Item(kind="theme", id="demo", name="Demo"))
 
     app = OmaStoreApp()
     updates: dict[str, object] = {}
