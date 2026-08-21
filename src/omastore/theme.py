@@ -4,6 +4,11 @@ import os
 import tomllib
 from pathlib import Path
 
+OMASTORE_ACCENT = "#7dcea0"
+OMASTORE_YELLOW = "#e0af68"
+OMASTORE_MUTED = "#8a8a8a"
+OMASTORE_LIGHTER = "#1a1a1a"
+
 
 def current_theme_dir() -> Path | None:
     linked = Path.home() / ".local/state/omarchy/current/theme"
@@ -40,7 +45,42 @@ def load_omarchy_colors() -> dict[str, str]:
         value = data.get(key)
         if isinstance(value, str) and value.startswith("#"):
             defaults[key] = value
-    return defaults
+    return polish_ui_colors(defaults)
+
+
+def _rgb(value: str) -> tuple[int, int, int]:
+    text = value.lstrip("#")
+    if len(text) == 3:
+        text = "".join(ch * 2 for ch in text)
+    return int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
+
+
+def _chroma(value: str) -> int:
+    red, green, blue = _rgb(value)
+    return max(red, green, blue) - min(red, green, blue)
+
+
+def _luma(value: str) -> float:
+    red, green, blue = _rgb(value)
+    return (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255.0
+
+
+def polish_ui_colors(colors: dict[str, str]) -> dict[str, str]:
+    """Keep chrome readable when the Omarchy theme is grayscale."""
+    out = dict(colors)
+    background = out["background"]
+    foreground = out["foreground"]
+    if _chroma(out["accent"]) < 40 or abs(_luma(out["accent"]) - _luma(background)) < 0.14:
+        out["accent"] = OMASTORE_ACCENT
+    if abs(_luma(out["muted"]) - _luma(background)) < 0.12 or abs(_luma(out["muted"]) - _luma(foreground)) < 0.08:
+        out["muted"] = OMASTORE_MUTED
+    if abs(_luma(out["lighter_background"]) - _luma(background)) < 0.04:
+        out["lighter_background"] = (
+            OMASTORE_LIGHTER if abs(_luma(OMASTORE_LIGHTER) - _luma(background)) > 0.04 else "#2a2a2a"
+        )
+    if _chroma(out.get("yellow", "#cecece")) < 40:
+        out["yellow"] = OMASTORE_YELLOW
+    return out
 
 
 def omarchy_theme_css() -> str:

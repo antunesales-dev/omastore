@@ -8,17 +8,11 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Click
 from textual.screen import ModalScreen
-from textual.strip import Strip
-from textual.style import Style as VisualStyle
-from textual.visual import RenderOptions, Visual
 from textual.widgets import Footer, Input, Markdown, OptionList, Static
 from textual.widgets.option_list import Option
+from textual_image.widget import Image as ShotImage
 from rich.cells import set_cell_size
-from rich.segment import Segment
-from rich.style import Style as RichStyle
 from rich.text import Text
-
-from omastore.ansi_image import Cells
 
 from omastore.actions import (
     ActionResult,
@@ -232,46 +226,6 @@ def item_markdown(
     return "\n".join(bits)
 
 
-class ShotVisual(Visual):
-    """Half-block screenshot that does not wrap or lose cell backgrounds."""
-
-    def __init__(self, rows: Cells) -> None:
-        self.rows = rows
-
-    def get_optimal_width(self, rules, container_width: int) -> int:
-        return len(self.rows[0]) if self.rows else 0
-
-    def get_height(self, rules, width: int) -> int:
-        return len(self.rows)
-
-    def render_strips(
-        self,
-        width: int,
-        height: int | None,
-        style: VisualStyle,
-        options: RenderOptions,
-    ) -> list[Strip]:
-        del style, options
-        if not self.rows or width <= 0:
-            return []
-        limit = len(self.rows) if height is None else min(len(self.rows), height)
-        strips: list[Strip] = []
-        for y in range(limit):
-            row = self.rows[y][:width]
-            segments = [
-                Segment(
-                    "▀",
-                    RichStyle(
-                        color=f"#{fg[0]:02x}{fg[1]:02x}{fg[2]:02x}",
-                        bgcolor=f"#{bg[0]:02x}{bg[1]:02x}{bg[2]:02x}",
-                    ),
-                )
-                for fg, bg in row
-            ]
-            strips.append(Strip(segments, len(row)))
-        return strips
-
-
 class ConfirmScreen(ModalScreen[bool]):
     BINDINGS = [
         Binding("y,enter", "yes", "Yes", show=False),
@@ -348,7 +302,7 @@ class OmaStoreApp(App[None]):
         self._highlighted_at = 0.0
         self._about_timer = None
         self._pending_about_key = ""
-        self._shots: dict[str, Cells] = {}
+        self._shots: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         yield Vertical(
@@ -372,7 +326,7 @@ class OmaStoreApp(App[None]):
             VerticalScroll(
                 Static(id="meta"),
                 Static(id="palette"),
-                Static(id="shot"),
+                ShotImage(id="shot"),
                 Markdown(id="readme"),
                 id="detail",
             ),
@@ -651,37 +605,25 @@ class OmaStoreApp(App[None]):
         if item.readme and cached:
             self._render_detail(item, settled=True)
             return
-        width, height = self._shot_pixels()
-        self._load_about(item.key, fetch_image=not cached, width=width, height=height)
+        self._load_about(item.key, fetch_image=not cached)
 
-    def _shot_pixels(self) -> tuple[int, int]:
-        width = 56
-        try:
-            detail = self.query_one("#detail")
-            inner = int(detail.size.width) - 4
-            if inner > 0:
-                width = max(24, min(80, inner))
-        except Exception:
-            pass
-        height = (width * 9) // 16
-        if height % 2:
-            height += 1
-        height = max(20, min(40, height))
-        if height % 2:
-            height += 1
-        return width, height
+    def _set_shot(self, path: str = "") -> None:
+        shot = self.query_one("#shot")
+        if hasattr(shot, "image"):
+            shot.image = path or None
+        else:
+            shot.update("")
+        shot.display = bool(path)
 
     def _render_detail(self, item: Item | None, *, settled: bool = False) -> None:
         meta = self.query_one("#meta", Static)
         palette = self.query_one("#palette", Static)
-        shot = self.query_one("#shot", Static)
         readme = self.query_one("#readme", Markdown)
         if item is None:
             meta.update("No matches.\nSearch, press 1 / 2 / 3, or f to filter.")
             palette.update("")
             palette.display = False
-            shot.update("")
-            shot.display = False
+            self._set_shot("")
             readme.update("_Try another search or switch tabs._")
             return
         header = Text()
@@ -711,49 +653,35 @@ class OmaStoreApp(App[None]):
             palette.update("")
             palette.display = False
         if settled:
-            cells = self._shots.get(item.key) or []
-            if cells:
-                shot.update(ShotVisual(cells))
-                shot.display = True
-            else:
-                shot.update("")
-                shot.display = False
+            self._set_shot(self._shots.get(item.key) or "")
             readme.update(item_markdown(item, item.readme, include_readme=True))
         else:
-            shot.update("")
-            shot.display = False
+            self._set_shot("")
             readme.update(item_markdown(item, include_readme=False, loading=True))
 
     @work(thread=True, exclusive=True, group="about")
-    def _load_about(
-        self,
-        key: str,
-        fetch_image: bool = True,
-        width: int = 72,
-        height: int = 40,
-    ) -> None:
+    def _load_about(self, key: str, fetch_image: bool = True) -> None:
         item = next((row for row in self.items if row.key == key), None)
         if item is None:
             return
-        from omastore.ansi_image import to_cells
         from omastore.enrich import enrich_item
         from omastore.previews import resolve_preview_path
 
         enrich_item(item)
-        cells: Cells = []
+        path = ""
         if fetch_image:
-            path = resolve_preview_path(item)
-            cells = to_cells(path, width=width, height=height) if path else []
+            found = resolve_preview_path(item)
+            path = str(found) if found else ""
         if not item.readme:
             item.readme = fetch_readme(item)
-        self.call_from_thread(self._apply_about, key, cells, fetch_image)
+        self.call_from_thread(self._apply_about, key, path, fetch_image)
 
-    def _apply_about(self, key: str, cells: Cells, fetch_image: bool = True) -> None:
+    def _apply_about(self, key: str, path: str, fetch_image: bool = True) -> None:
         item = next((row for row in self.items if row.key == key), None)
         if item is None:
             return
         if fetch_image:
-            self._shots[key] = cells or []
+            self._shots[key] = path or ""
         if self.selected and self.selected.key == key:
             self._render_detail(item, settled=True)
 

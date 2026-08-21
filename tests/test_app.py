@@ -134,15 +134,6 @@ def test_shots_cache_starts_empty() -> None:
     assert OmaStoreApp()._shots == {}
 
 
-def test_shot_pixels_are_even_16_by_9() -> None:
-    from omastore.app import OmaStoreApp
-
-    width, height = OmaStoreApp()._shot_pixels()
-    assert width >= 24
-    assert height % 2 == 0
-    assert 20 <= height <= 40
-
-
 def test_markdown_mentions_extra_details_not_required() -> None:
     for extra in (True, False):
         item = Item(
@@ -210,33 +201,37 @@ def test_action_hints_wrap_onto_two_lines() -> None:
 def test_render_detail_hides_empty_shots() -> None:
     from rich.text import Text
 
-    from omastore.app import OmaStoreApp, ShotVisual
+    from omastore.app import OmaStoreApp
 
     app = OmaStoreApp()
-    updates: dict[str, object] = {}
+    stubs: dict[str, _ShotStub] = {}
 
-    class _Stub:
+    class _ShotStub:
         def __init__(self, key: str) -> None:
             self.key = key
+            self.image = None
+            self.display = True
 
         def update(self, value: object = "") -> None:
-            updates[self.key] = value
+            self.value = value
 
-    app.query_one = lambda selector, cls=None: _Stub(selector)  # type: ignore[method-assign]
+    def query_one(selector, cls=None):
+        if selector not in stubs:
+            stubs[selector] = _ShotStub(selector)
+        return stubs[selector]
+
+    app.query_one = query_one  # type: ignore[method-assign]
     item = Item(kind="theme", id="demo", name="Demo")
 
-    app._shots[item.key] = []
+    app._shots[item.key] = ""
     app._render_detail(item, settled=True)
-    assert updates["#shot"] == ""
+    assert stubs["#shot"].image is None
+    assert stubs["#shot"].display is False
 
-    cells = [[((255, 0, 0), (0, 0, 255)), ((0, 255, 0), (255, 255, 255))]]
-    app._shots[item.key] = cells
+    app._shots[item.key] = "/tmp/preview.png"
     app._render_detail(item, settled=True)
-    visual = updates["#shot"]
-    assert isinstance(visual, ShotVisual)
-    strips = visual.render_strips(2, None, None, None)  # type: ignore[arg-type]
-    assert len(strips) == 1
-    assert strips[0].text == "▀▀"
+    assert stubs["#shot"].image == "/tmp/preview.png"
+    assert stubs["#shot"].display is True
 
-    meta = updates["#meta"]
+    meta = stubs["#meta"].value
     assert "[p] preview" in (meta.plain if isinstance(meta, Text) else str(meta))
