@@ -268,7 +268,7 @@ class ShotScreen(ModalScreen[None]):
         Binding("plus,equal", "zoom_in", "Zoom+", show=False),
         Binding("minus", "zoom_out", "Zoom−", show=False),
         Binding("0", "zoom_fit", "Fit", show=False),
-        Binding("o,p", "open_file", "Open", show=False),
+        Binding("o", "open_file", "Open", show=False),
     ]
 
     def __init__(self, path: str, title: str = "") -> None:
@@ -278,7 +278,7 @@ class ShotScreen(ModalScreen[None]):
         self.zoom = 1.0
 
     def compose(self) -> ComposeResult:
-        yield Static(self._bar(), id="shot-bar")
+        yield Static(self._bar(), id="shot-bar", markup=False)
         yield ScrollableContainer(ShotImage(id="shot-full"), id="shot-scroll")
 
     def on_mount(self) -> None:
@@ -291,9 +291,8 @@ class ShotScreen(ModalScreen[None]):
         if len(name) > room:
             name = name[: room - 1] + "…"
         title = f"{name}{extra}"
-        zoom_keys = "[+] in    [-] out    [0] fit"
-        leave_keys = "[o] open file    [esc] close"
-        return f"{title}\n{zoom_keys}\n{leave_keys}"
+        keys = "[+] in  [-] out  [0] fit  [o] open file  [esc] close"
+        return f"{title}\n{keys}"
 
     def _view(self):
         from PIL import Image as PILImage

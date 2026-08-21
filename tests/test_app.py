@@ -124,9 +124,12 @@ def test_markdown_includes_warnings() -> None:
 
 
 def test_preview_binding_exists() -> None:
-    from omastore.app import OmaStoreApp
+    from omastore.app import OmaStoreApp, ShotScreen
 
     assert any(binding.key == "p" and binding.action == "open_preview" for binding in OmaStoreApp.BINDINGS)
+    shot_keys = ",".join(binding.key for binding in ShotScreen.BINDINGS)
+    assert "p" not in shot_keys.split(",")
+    assert any(binding.action == "open_file" and "o" in binding.key.split(",") for binding in ShotScreen.BINDINGS)
 
 
 def test_shot_zoom_steps() -> None:
@@ -143,11 +146,10 @@ def test_shot_bar_lists_keys() -> None:
     bar = ShotScreen("/tmp/preview.png", "Localhost")._bar()
     assert "Localhost" in bar
     lines = bar.split("\n")
-    assert len(lines) == 3
+    assert len(lines) == 2
     assert "[+] in" in lines[1]
-    assert "[o] open file" in lines[2]
-    assert "[esc] close" in lines[2]
-    assert all(len(line) <= 40 for line in lines[1:])
+    assert "[o] open file" in lines[1]
+    assert "[esc] close" in lines[1]
 
 
 def test_shots_cache_starts_empty() -> None:
