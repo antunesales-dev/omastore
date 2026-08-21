@@ -80,6 +80,8 @@ class Item:
     installed_rev: str = ""
     latest_rev: str = ""
     outdated: bool = False
+    kinds: list[str] = field(default_factory=list)
+    extra_details: bool = False
 
     @property
     def key(self) -> str:
