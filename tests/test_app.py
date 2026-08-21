@@ -137,6 +137,16 @@ def test_shot_zoom_steps() -> None:
     assert next_shot_zoom(1.0, -1) == 1.0
 
 
+def test_shot_bar_lists_keys() -> None:
+    from omastore.app import ShotScreen
+
+    bar = ShotScreen("/tmp/preview.png", "Localhost")._bar()
+    assert "Localhost" in bar
+    assert "[+] zoom in" in bar
+    assert "[esc] close" in bar
+    assert "\n" in bar
+
+
 def test_shots_cache_starts_empty() -> None:
     from omastore.app import OmaStoreApp
 

@@ -264,11 +264,11 @@ class ConfirmScreen(ModalScreen[bool]):
 
 class ShotScreen(ModalScreen[None]):
     BINDINGS = [
-        Binding("escape,q", "close", "Close", show=True),
-        Binding("plus,equal", "zoom_in", "Zoom+", show=True),
-        Binding("minus", "zoom_out", "Zoom−", show=True),
-        Binding("0", "zoom_fit", "Fit", show=True),
-        Binding("o,p", "open_file", "Open", show=True),
+        Binding("escape,q", "close", "Close", show=False),
+        Binding("plus,equal", "zoom_in", "Zoom+", show=False),
+        Binding("minus", "zoom_out", "Zoom−", show=False),
+        Binding("0", "zoom_fit", "Fit", show=False),
+        Binding("o,p", "open_file", "Open", show=False),
     ]
 
     def __init__(self, path: str, title: str = "") -> None:
@@ -278,30 +278,37 @@ class ShotScreen(ModalScreen[None]):
         self.zoom = 1.0
 
     def compose(self) -> ComposeResult:
-        yield Vertical(
-            Static(self._bar(), id="shot-bar"),
-            ScrollableContainer(ShotImage(self.path, id="shot-full"), id="shot-scroll"),
-            id="shot-modal",
-        )
+        yield Static(self._bar(), id="shot-bar")
+        yield ScrollableContainer(ShotImage(id="shot-full"), id="shot-scroll")
 
     def on_mount(self) -> None:
         self._apply_zoom()
 
     def _bar(self) -> str:
         name = self.shot_title or "preview"
-        return f"{name}  ·  {self.zoom:g}×    + in   − out   0 fit   o file   esc close"
+        return (
+            f"{name}  ·  {self.zoom:g}×\n"
+            "[+] zoom in   [-] zoom out   [0] fit   [o] open file   [esc] close"
+        )
+
+    def _view(self):
+        from PIL import Image as PILImage
+
+        image = PILImage.open(self.path).convert("RGB")
+        if self.zoom <= 1.0:
+            return image
+        width, height = image.size
+        crop_w = max(1, int(width / self.zoom))
+        crop_h = max(1, int(height / self.zoom))
+        left = max(0, (width - crop_w) // 2)
+        top = max(0, (height - crop_h) // 2)
+        return image.crop((left, top, left + crop_w, top + crop_h))
 
     def _apply_zoom(self) -> None:
         image = self.query_one("#shot-full", ShotImage)
-        box = self.query_one("#shot-scroll")
-        width = box.size.width or 80
-        height = box.size.height or 24
-        if self.zoom <= 1.0:
-            image.styles.width = "1fr"
-            image.styles.height = "1fr"
-        else:
-            image.styles.width = max(8, int(width * self.zoom))
-            image.styles.height = max(4, int(height * self.zoom))
+        image.styles.width = "1fr"
+        image.styles.height = "1fr"
+        image.image = self._view()
         self.query_one("#shot-bar", Static).update(self._bar())
 
     def action_zoom_in(self) -> None:
