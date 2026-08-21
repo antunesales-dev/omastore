@@ -82,11 +82,19 @@ Header, Footer, #chrome, #status, #credits-line {{
 }}
 
 #list {{
+    background: {c["background"]};
+    border: none;
     border-right: tall {c["lighter_background"]};
 }}
 
 #list:focus {{
+    border: none;
     border-right: tall {c["accent"]};
+}}
+
+#list > .option-list--option-highlighted {{
+    background: {c["lighter_background"]};
+    color: {c["foreground"]};
 }}
 
 #credits, #confirm {{

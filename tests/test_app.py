@@ -1,4 +1,13 @@
-from omastore.app import action_hints, format_action_hints, item_markdown, palette_text, sort_items
+from omastore.app import (
+    action_groups,
+    action_hints,
+    filter_bar,
+    format_action_hints,
+    item_markdown,
+    palette_text,
+    sort_items,
+)
+from omastore.filters import Query
 from omastore.models import Item
 
 
@@ -152,6 +161,30 @@ def test_markdown_mentions_extra_details_not_required() -> None:
         assert "workspace overview" in md
         assert "1.2.3" in md
         assert "MIT" in md
+
+
+def test_filter_bar_is_readable() -> None:
+    assert "is:all" not in filter_bar(Query())
+    assert "stars" in filter_bar(Query())
+    assert "f filter" in filter_bar(Query())
+    bar = filter_bar(Query(status="installed", sort="name"))
+    assert "installed" in bar
+    assert "name" in bar
+
+
+def test_action_groups_split_do_and_open() -> None:
+    item = Item(
+        kind="theme",
+        id="lumon",
+        name="Lumon",
+        installed=True,
+        extra=True,
+        install_url="https://github.com/example/lumon",
+    )
+    do, look = action_groups(item)
+    assert "[t] try" in do
+    assert "[p] preview" in look
+    assert "[p] preview" not in do
 
 
 def test_action_hints_wrap_onto_two_lines() -> None:

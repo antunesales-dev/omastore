@@ -23,7 +23,7 @@ from omastore.actions import (
     update,
 )
 from omastore.catalog import fetch_readme, load_store
-from omastore.credits import ABOUT, STATUS_CREDIT
+from omastore.credits import ABOUT, THEME_STORE_AUTHOR, PLUGIN_STORE_AUTHOR
 from omastore.filters import Query, apply_query, cycle_sort, cycle_source, cycle_status, parse_search
 from omastore.models import Item, Tab
 from omastore.theme import omarchy_theme_css
@@ -64,20 +64,22 @@ def list_prompt(item: Item, width: int = 40) -> Text:
     else:
         mark, style = "○", "dim"
     text.append(f"{mark} ", style=style)
-    badge = item.verification_label
-    if badge == "verified":
-        text.append("✓ ", style="green")
-    elif badge == "unverified":
-        text.append("- ", style="yellow")
-    else:
-        text.append("  ")
+    used = 2
+    if item.kind == "plugin":
+        badge = item.verification_label
+        if badge == "verified":
+            text.append("✓ ", style="green")
+        elif badge == "unverified":
+            text.append("- ", style="yellow")
+        else:
+            text.append("  ")
+        used += 2
     if getattr(item, "outdated", False):
         text.append("↑ ", style="yellow")
-    else:
-        text.append("  ")
+        used += 2
     star = f"*{item.stars}" if item.stars is not None and item.stars > 0 else ""
-    star_width = 6
-    name_width = max(8, width - 6 - (star_width + 1 if star else 0))
+    star_width = 6 if star else 0
+    name_width = max(8, width - used - (star_width + 1 if star else 0))
     text.append(set_cell_size(item.name, name_width))
     if star:
         text.append(" ")
@@ -85,28 +87,31 @@ def list_prompt(item: Item, width: int = 40) -> Text:
     return text
 
 
-def action_hints(item: Item) -> list[str]:
-    actions: list[str] = []
+def action_groups(item: Item) -> tuple[list[str], list[str]]:
+    do: list[str] = []
     if item.can_install:
-        actions.append("[i] install")
+        do.append("[i] install")
     if item.kind == "theme":
         if item.installed:
-            actions.append("[t] try")
-        actions.append("[b] back")
+            do.append("[t] try")
+        do.append("[b] back")
     if item.can_apply:
-        actions.append("[a] apply")
+        do.append("[a] apply")
     if item.can_enable:
-        actions.append("[e] enable")
+        do.append("[e] enable")
     if item.can_disable:
-        actions.append("[d] disable")
+        do.append("[d] disable")
     if item.can_update:
-        actions.append("[u] update")
+        do.append("[u] update")
     if item.can_remove:
-        actions.append("[x] remove")
-    actions.append("[o] repo")
-    actions.append("[c] catalog")
-    actions.append("[p] preview")
-    return actions
+        do.append("[x] remove")
+    look = ["[o] repo", "[c] catalog", "[p] preview"]
+    return do, look
+
+
+def action_hints(item: Item) -> list[str]:
+    do, look = action_groups(item)
+    return [*do, *look]
 
 
 def format_action_hints(actions: list[str], width: int = 48) -> str:
@@ -129,6 +134,24 @@ def format_action_hints(actions: list[str], width: int = 48) -> str:
     if current:
         lines.append("  ".join(current))
     return "\n".join(lines)
+
+
+def filter_bar(query: Query) -> str:
+    bits: list[str] = []
+    if query.status != "all":
+        bits.append(query.status)
+    if query.source != "all":
+        bits.append(query.source)
+    if query.hue != "all":
+        bits.append(query.hue)
+    if query.category != "all":
+        bits.append(query.category)
+    if query.tag != "all":
+        bits.append(query.tag)
+    if query.verified != "all":
+        bits.append(f"verified:{query.verified}")
+    bits.append(query.sort)
+    return f"{' · '.join(bits)}     f filter   v source   s sort"
 
 
 def palette_text(colors: dict[str, str]) -> Text:
@@ -188,14 +211,14 @@ def item_markdown(
         bits.append("")
         bits.append("**Warnings**")
         bits.extend(f"- {warning}" for warning in item.warnings)
-    bits.append("")
-    bits.append("Listed in a community catalog. The work belongs to its author.")
-    bits.append("Community plugins and themes run unsandboxed. Read the repo before installing.")
     if loading:
-        bits.extend(["", "---", "", "_Loading about…_"])
+        bits.extend(["", "_Loading about…_"])
         return "\n".join(bits)
     if not include_readme:
         return "\n".join(bits)
+    bits.append("")
+    bits.append("Listed in a community catalog. The work belongs to its author.")
+    bits.append("Community plugins and themes run unsandboxed. Read the repo before installing.")
     body = readme if readme is not None else item.readme
     if body:
         bits.extend(["", "---", "", "## About", "", body])
@@ -240,25 +263,25 @@ class OmaStoreApp(App[None]):
     CSS_PATH = "app.tcss"
     BINDINGS = [
         Binding("slash", "focus_search", "Search", show=True),
-        Binding("escape", "blur_search", "Back", show=False),
-        Binding("1", "set_tab('themes')", "Themes", show=True),
-        Binding("2", "set_tab('plugins')", "Plugins", show=True),
-        Binding("3", "set_tab('installed')", "Installed", show=True),
-        Binding("i", "do_install", "Install", show=True),
-        Binding("t", "try_theme", "Try", show=True),
-        Binding("b", "revert_theme", "Back", show=True),
-        Binding("o", "open_repo", "Repo", show=True),
-        Binding("c", "open_catalog", "Catalog", show=True),
-        Binding("p", "open_preview", "Preview", show=True),
-        Binding("a", "do_apply", "Apply", show=True),
+        Binding("escape", "blur_search", "List", show=False),
+        Binding("1", "set_tab('themes')", "Themes", show=False),
+        Binding("2", "set_tab('plugins')", "Plugins", show=False),
+        Binding("3", "set_tab('installed')", "Installed", show=False),
+        Binding("i", "do_install", "Install", show=False),
+        Binding("t", "try_theme", "Try", show=False),
+        Binding("b", "revert_theme", "Back", show=False),
+        Binding("o", "open_repo", "Repo", show=False),
+        Binding("c", "open_catalog", "Catalog", show=False),
+        Binding("p", "open_preview", "Preview", show=False),
+        Binding("a", "do_apply", "Apply", show=False),
         Binding("e", "do_enable", "Enable", show=False),
         Binding("d", "do_disable", "Disable", show=False),
-        Binding("u", "do_update", "Update", show=True),
-        Binding("x", "do_remove", "Remove", show=True),
-        Binding("r", "refresh", "Refresh", show=True),
+        Binding("u", "do_update", "Update", show=False),
+        Binding("x", "do_remove", "Remove", show=False),
+        Binding("r", "refresh", "Refresh", show=False),
         Binding("f", "cycle_status", "Filter", show=True),
-        Binding("v", "cycle_source", "Source", show=True),
-        Binding("s", "cycle_sort", "Sort", show=True),
+        Binding("v", "cycle_source", "Source", show=False),
+        Binding("s", "cycle_sort", "Sort", show=False),
         Binding("question_mark", "credits", "Credits", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
@@ -282,13 +305,13 @@ class OmaStoreApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static("Omastore  ·  a client for their catalogs", id="brand"),
             Horizontal(
-                Static("themes", id="tab-themes", classes="tab active"),
-                Static("plugins", id="tab-plugins", classes="tab"),
-                Static("installed", id="tab-installed", classes="tab"),
+                Static("Omastore", id="brand"),
+                Static("1 themes", id="tab-themes", classes="tab active"),
+                Static("2 plugins", id="tab-plugins", classes="tab"),
+                Static("3 installed", id="tab-installed", classes="tab"),
                 Input(
-                    placeholder="Search",
+                    placeholder="Search  ·  /  to type",
                     id="search",
                     value=self.search,
                 ),
@@ -309,7 +332,6 @@ class OmaStoreApp(App[None]):
             id="body",
         )
         yield Static(self.status_text, id="status")
-        yield Static(STATUS_CREDIT, id="credits-line")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -527,9 +549,7 @@ class OmaStoreApp(App[None]):
             self._cancel_about()
             self._render_detail(None)
         active = self._active_query()
-        self.query_one("#filters", Static).update(
-            f"filter  {active.label()}    [f] status  [v] source  [s] sort"
-        )
+        self.query_one("#filters", Static).update(filter_bar(active))
         extra = ""
         try:
             from omastore.preview import preview_status
@@ -543,8 +563,9 @@ class OmaStoreApp(App[None]):
                 extra += f"  ·  {n_old} outdated"
         except Exception:
             extra = ""
+        credit = f"{THEME_STORE_AUTHOR} · {PLUGIN_STORE_AUTHOR}  ?"
         self.query_one("#status", Static).update(
-            f"{self.status_text}  ·  {len(self.shown)} shown{extra}"
+            f"{self.status_text}  ·  {len(self.shown)} shown{extra}    {credit}"
         )
 
     def _select_key(self, key: str, *, immediate: bool = False) -> None:
@@ -609,32 +630,39 @@ class OmaStoreApp(App[None]):
         shot = self.query_one("#shot", Static)
         readme = self.query_one("#readme", Markdown)
         if item is None:
-            meta.update("No matches.")
+            meta.update("No matches.\nSearch, press 1 / 2 / 3, or f to filter.")
             palette.update("")
+            palette.display = False
             shot.update("")
             shot.display = False
             readme.update("_Try another search or switch tabs._")
             return
         header = Text()
         header.append(item.name, style="bold")
-        header.append("\n\n")
+        header.append("\n")
         subtitle = "  ·  ".join(
             part
             for part in (item.kind, item.author, item.status_label)
             if part
         )
         header.append(subtitle or item.kind, style="dim")
-        actions = action_hints(item)
-        if actions:
-            pane_width = 48
-            try:
-                pane_width = max(32, int(self.query_one("#detail").size.width) - 8)
-            except Exception:
-                pass
-            header.append("\n\n")
-            header.append(format_action_hints(actions, width=pane_width), style="bold")
+        pane_width = 48
+        try:
+            pane_width = max(32, int(self.query_one("#detail").size.width) - 6)
+        except Exception:
+            pass
+        do, look = action_groups(item)
+        blocks = [format_action_hints(group, width=pane_width) for group in (do, look) if group]
+        if blocks:
+            header.append("\n")
+            header.append("\n".join(blocks), style="bold")
         meta.update(header)
-        palette.update(palette_text(item.colors) if item.colors else Text(""))
+        if item.colors:
+            palette.update(palette_text(item.colors))
+            palette.display = True
+        else:
+            palette.update("")
+            palette.display = False
         if settled:
             ansi = self._shots.get(item.key) or ""
             if ansi and ansi.strip() and ansi.strip() != "no preview":

@@ -9,14 +9,13 @@ $ omastore
 ```
 
 ```
-Omastore
- themes   plugins   installed     / search…
+Omastore  1 themes  2 plugins  3 installed     Search  ·  /
 
- ● Vantablack          stock · current     VANTABLACK
- ○ Lumon         ★164  extra               OldJobobo · theme · blue
- ○ Tokyo Night         stock               [i] install   [a] apply
- ○ Overview      ★7    plugin
-                                           A cold corporate Omarchy theme…
+ stars     f filter   v source   s sort
+
+ ● Spacex
+ ● Tokyo Night                              [t] try  [b] back  [a] apply
+ ○ Lumon                              *164  [o] repo  [c] catalog  [p] preview
 ```
 
 Not affiliated with Omarchy, 37signals, or the community catalog sites. Those sites stay the galleries. omastore is a terminal client for the same catalogs.
