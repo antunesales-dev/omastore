@@ -115,11 +115,12 @@ omastore about
 | `v` | cycle community / built-in |
 | `y` | cycle verified / unverified (plugins) |
 | `s` | cycle sort (stars = rating) |
+| `0` | reset filters (Escape does the same from the list) |
 | `enter` | install, apply, or enable |
 | `i` | install |
 | `t` / `b` | try an installed theme (does not freeze the list) / restore the previous one |
 | `o` / `c` | open the author repo / catalog site |
-| `p` | enlarge the screenshot (click it; `+`/`−` zoom, `o` opens the file) |
+| `p` | enlarge the screenshot (`+`/`−` zoom, arrows pan, `o` opens the file) |
 | `a` | apply theme |
 | `e` / `d` | enable / disable plugin |
 | `u` | update |

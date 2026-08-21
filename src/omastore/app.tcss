@@ -59,6 +59,7 @@ Footer {
     height: 1;
     color: #888888;
     padding: 0 1;
+    overflow: hidden;
 }
 
 #body {
@@ -153,6 +154,7 @@ Footer {
     color: #888888;
     padding: 0 1;
     background: #1a1a1a;
+    overflow: hidden;
 }
 
 #credits-line {

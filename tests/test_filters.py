@@ -6,6 +6,8 @@ from omastore.filters import (
     cycle_verified,
     matches_filters,
     parse_search,
+    reset_filters,
+    strip_filter_tokens,
 )
 from omastore.models import Item
 
@@ -117,6 +119,30 @@ def test_cycle_verified() -> None:
 def test_clamp_query_drops_theme_status_on_plugins() -> None:
     query = clamp_query(Query(status="current"), "plugins")
     assert query.status == "all"
+
+
+def test_reset_filters_keeps_search_text() -> None:
+    query = Query(
+        text="clipboard",
+        status="installed",
+        source="community",
+        verified="yes",
+        sort="name",
+        min_stars=10,
+    )
+    reset = reset_filters(query)
+    assert reset.text == "clipboard"
+    assert reset.status == "all"
+    assert reset.source == "all"
+    assert reset.verified == "all"
+    assert reset.sort == "stars"
+    assert reset.min_stars == 0
+
+
+def test_strip_filter_tokens() -> None:
+    assert strip_filter_tokens("clipboard is:installed verified:yes src:community") == "clipboard"
+    assert strip_filter_tokens("stars:10 overview") == "overview"
+    assert strip_filter_tokens("") == ""
 
 
 def test_themes_sort_installed_before_catalog() -> None:
