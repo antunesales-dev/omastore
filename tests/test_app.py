@@ -142,9 +142,12 @@ def test_shot_bar_lists_keys() -> None:
 
     bar = ShotScreen("/tmp/preview.png", "Localhost")._bar()
     assert "Localhost" in bar
-    assert "[+] zoom in" in bar
-    assert "[esc] close" in bar
-    assert "\n" in bar
+    lines = bar.split("\n")
+    assert len(lines) == 3
+    assert "[+] in" in lines[1]
+    assert "[o] open file" in lines[2]
+    assert "[esc] close" in lines[2]
+    assert all(len(line) <= 40 for line in lines[1:])
 
 
 def test_shots_cache_starts_empty() -> None:

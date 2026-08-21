@@ -284,12 +284,16 @@ class ShotScreen(ModalScreen[None]):
     def on_mount(self) -> None:
         self._apply_zoom()
 
-    def _bar(self) -> str:
+    def _bar(self, width: int = 60) -> str:
         name = self.shot_title or "preview"
-        return (
-            f"{name}  ·  {self.zoom:g}×\n"
-            "[+] zoom in   [-] zoom out   [0] fit   [o] open file   [esc] close"
-        )
+        extra = f"  ·  {self.zoom:g}×"
+        room = max(8, int(width) - len(extra) - 2)
+        if len(name) > room:
+            name = name[: room - 1] + "…"
+        title = f"{name}{extra}"
+        zoom_keys = "[+] in    [-] out    [0] fit"
+        leave_keys = "[o] open file    [esc] close"
+        return f"{title}\n{zoom_keys}\n{leave_keys}"
 
     def _view(self):
         from PIL import Image as PILImage
@@ -309,7 +313,8 @@ class ShotScreen(ModalScreen[None]):
         image.styles.width = "1fr"
         image.styles.height = "1fr"
         image.image = self._view()
-        self.query_one("#shot-bar", Static).update(self._bar())
+        width = self.size.width or 60
+        self.query_one("#shot-bar", Static).update(self._bar(width))
 
     def action_zoom_in(self) -> None:
         self.zoom = next_shot_zoom(self.zoom, 1)
