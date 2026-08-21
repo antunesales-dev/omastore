@@ -449,10 +449,11 @@ def test_reset_filters_clears_cycles_and_prefixes() -> None:
     app.search = "clipboard is:installed verified:yes"
     app.filters = Query(status="installed", source="community", verified="yes", sort="name", min_stars=5)
     rebuilt: list[str] = []
-    notes: list[str] = []
     app._rebuild_list = lambda: rebuilt.append("rebuild")  # type: ignore[method-assign]
-    app.notify = lambda message, **_kwargs: notes.append(str(message))  # type: ignore[method-assign]
-    app.query_one = lambda *a, **k: SimpleNamespace(value="clipboard is:installed verified:yes")  # type: ignore[method-assign]
+    app._search_focused = lambda: False  # type: ignore[method-assign]
+    box = SimpleNamespace(value="clipboard is:installed verified:yes")
+    app.query_one = lambda *a, **k: box  # type: ignore[method-assign]
+    app.prevent = lambda *_a, **_k: __import__("contextlib").nullcontext()  # type: ignore[method-assign]
     app.action_reset_filters()
     assert app.search == "clipboard"
     assert app.filters.status == "all"
@@ -461,28 +462,52 @@ def test_reset_filters_clears_cycles_and_prefixes() -> None:
     assert app.filters.sort == "stars"
     assert app.filters.min_stars == 0
     assert rebuilt == ["rebuild"]
-    assert notes == ["filters reset"]
 
 
-def test_escape_on_list_resets_filters() -> None:
-    from types import SimpleNamespace
-
+def test_reset_skipped_when_search_focused_or_clean() -> None:
     from omastore.app import OmaStoreApp
+    from omastore.filters import Query
 
     app = OmaStoreApp()
-    reset: list[str] = []
-    app.action_reset_filters = lambda: reset.append("reset")  # type: ignore[method-assign]
-    focused: list[str] = []
-    app.query_one = lambda *a, **k: SimpleNamespace(has_focus=False, focus=lambda: focused.append("list"))  # type: ignore[method-assign]
-    app.action_blur_or_reset()
-    assert reset == ["reset"]
-    assert focused == []
+    rebuilt: list[str] = []
+    app._rebuild_list = lambda: rebuilt.append("rebuild")  # type: ignore[method-assign]
+    app._search_focused = lambda: True  # type: ignore[method-assign]
+    app.filters = Query(status="installed")
+    app.action_reset_filters()
+    assert rebuilt == []
+    assert app.filters.status == "installed"
 
-    reset.clear()
-    app.query_one = lambda *a, **k: SimpleNamespace(has_focus=True, focus=lambda: focused.append("list"))  # type: ignore[method-assign]
-    app.action_blur_or_reset()
-    assert reset == []
-    assert focused == ["list"]
+    app._search_focused = lambda: False  # type: ignore[method-assign]
+    app.filters = Query()
+    app.search = "clipboard"
+    app.action_reset_filters()
+    assert rebuilt == []
+
+
+def test_escape_only_blurs_search() -> None:
+    from omastore.app import OmaStoreApp
+
+    assert any(binding.key == "escape" and binding.action == "blur_search" for binding in OmaStoreApp.BINDINGS)
+    assert not any(binding.action == "blur_or_reset" for binding in OmaStoreApp.BINDINGS)
+
+
+def test_verified_cycle_ignored_off_plugins() -> None:
+    from omastore.app import OmaStoreApp
+    from omastore.filters import Query
+
+    app = OmaStoreApp()
+    app.tab = "themes"
+    app.filters = Query()
+    rebuilt: list[str] = []
+    app._rebuild_list = lambda: rebuilt.append("rebuild")  # type: ignore[method-assign]
+    app._search_focused = lambda: False  # type: ignore[method-assign]
+    app.action_cycle_verified()
+    assert app.filters.verified == "all"
+    assert rebuilt == []
+    app.tab = "plugins"
+    app.action_cycle_verified()
+    assert app.filters.verified == "yes"
+    assert rebuilt == ["rebuild"]
 
 
 def test_shot_open_file_uses_path_uri(monkeypatch) -> None:

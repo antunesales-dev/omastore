@@ -115,7 +115,7 @@ omastore about
 | `v` | cycle community / built-in |
 | `y` | cycle verified / unverified (plugins) |
 | `s` | cycle sort (stars = rating) |
-| `0` | reset filters (Escape does the same from the list) |
+| `0` | reset filters (does nothing while typing in search) |
 | `enter` | install, apply, or enable |
 | `i` | install |
 | `t` / `b` | try an installed theme (does not freeze the list) / restore the previous one |

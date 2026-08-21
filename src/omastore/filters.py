@@ -5,7 +5,7 @@ from datetime import datetime
 
 from omastore.models import Item, Tab
 
-STATUS_CYCLE = ("all", "installed", "available", "extra", "stock", "current", "outdated")
+STATUS_CYCLE = ("all", "installed", "available", "extra", "stock")
 PLUGIN_STATUS_CYCLE = ("all", "installed", "not-installed")
 SOURCE_CYCLE = ("all", "community", "builtin")
 VERIFIED_CYCLE = ("all", "yes", "no")
