@@ -90,6 +90,7 @@ omastore try theme:lumon
 omastore revert
 omastore open theme:lumon
 omastore open plugin:omarchy-overview --catalog
+omastore preview plugin:omarchy-overview
 omastore info theme:lumon --readme
 omastore install theme:lumon
 omastore apply lumon
@@ -113,6 +114,7 @@ omastore about
 | `i` | install |
 | `t` / `b` | try a theme / restore the previous one |
 | `o` / `c` | open the author repo / catalog site |
+| `p` | open a catalog or repo screenshot |
 | `a` | apply theme |
 | `e` / `d` | enable / disable plugin |
 | `u` | update |
@@ -121,7 +123,7 @@ omastore about
 | `?` | credits |
 | `q` | quit |
 
-Theme preview is the 16-color palette from the catalog. Plugin detail is the marketplace listing plus the upstream README.
+Theme detail shows the catalog palette. After you settle on a row, omastore also tries a catalog or GitHub screenshot (half-block ANSI in the pane; `p` opens the file). Thin plugin listings fill empty fields from the author's `manifest.json` without overwriting catalog text. Plugin about is still the marketplace listing plus the upstream README.
 
 ## Catalogs
 

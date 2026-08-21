@@ -199,6 +199,7 @@ class OmaStoreApp(App[None]):
         Binding("b", "revert_theme", "Back", show=True),
         Binding("o", "open_repo", "Repo", show=True),
         Binding("c", "open_catalog", "Catalog", show=True),
+        Binding("p", "open_preview", "Preview", show=True),
         Binding("a", "do_apply", "Apply", show=True),
         Binding("e", "do_enable", "Enable", show=False),
         Binding("d", "do_disable", "Disable", show=False),
@@ -227,6 +228,7 @@ class OmaStoreApp(App[None]):
         self._highlighted_at = 0.0
         self._about_timer = None
         self._pending_about_key = ""
+        self._shots: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         yield Vertical(
@@ -250,6 +252,7 @@ class OmaStoreApp(App[None]):
             VerticalScroll(
                 Static(id="meta"),
                 Static(id="palette"),
+                Static(id="shot"),
                 Markdown(id="readme"),
                 id="detail",
             ),
@@ -338,6 +341,15 @@ class OmaStoreApp(App[None]):
 
     def action_open_catalog(self) -> None:
         self._open_link("catalog")
+
+    def action_open_preview(self) -> None:
+        item = self.selected
+        if item is None:
+            return
+        from omastore.previews import open_preview
+
+        result = open_preview(item)
+        self.notify(str(result.get("message") or "preview"))
 
     def _open_link(self, target: str) -> None:
         item = self.selected
@@ -498,18 +510,22 @@ class OmaStoreApp(App[None]):
         self._show_about(item)
 
     def _show_about(self, item: Item) -> None:
-        if item.readme:
+        cached = item.key in self._shots
+        if item.readme and cached:
             self._render_detail(item, settled=True)
             return
-        self._load_readme(item.key)
+        self._load_about(item.key, fetch_image=not cached)
 
     def _render_detail(self, item: Item | None, *, settled: bool = False) -> None:
         meta = self.query_one("#meta", Static)
         palette = self.query_one("#palette", Static)
+        shot = self.query_one("#shot", Static)
         readme = self.query_one("#readme", Markdown)
         if item is None:
             meta.update("No matches.")
             palette.update("")
+            shot.update("")
+            shot.display = False
             readme.update("_Try another search or switch tabs._")
             return
         actions = []
@@ -522,6 +538,7 @@ class OmaStoreApp(App[None]):
             actions.append("[a] apply")
         actions.append("[o] repo")
         actions.append("[c] catalog")
+        actions.append("[p] preview")
         if item.can_enable:
             actions.append("[e] enable")
         if item.can_disable:
@@ -544,24 +561,45 @@ class OmaStoreApp(App[None]):
             header.append("    ".join(actions), style="bold")
         meta.update(header)
         palette.update(palette_text(item.colors) if item.colors else Text(""))
-        if settled and item.readme:
+        if settled:
+            ansi = self._shots.get(item.key) or ""
+            if ansi and ansi.strip() and ansi.strip() != "no preview":
+                shot.update(Text.from_ansi(ansi))
+                shot.display = True
+            else:
+                shot.update("")
+                shot.display = False
             readme.update(item_markdown(item, item.readme, include_readme=True))
         else:
+            shot.update("")
+            shot.display = False
             readme.update(item_markdown(item, include_readme=False, loading=True))
 
-    @work(thread=True, exclusive=True, group="readme")
-    def _load_readme(self, key: str) -> None:
-        item = next((row for row in self.items if row.key == key), None)
-        if item is None or item.readme:
-            return
-        text = fetch_readme(item)
-        self.call_from_thread(self._apply_readme, key, text)
-
-    def _apply_readme(self, key: str, text: str) -> None:
+    @work(thread=True, exclusive=True, group="about")
+    def _load_about(self, key: str, fetch_image: bool = True) -> None:
         item = next((row for row in self.items if row.key == key), None)
         if item is None:
             return
-        item.readme = text
+        from omastore.ansi_image import to_ansi
+        from omastore.enrich import enrich_item
+        from omastore.previews import ensure_cached, resolve_preview
+
+        enrich_item(item)
+        ansi = ""
+        if fetch_image:
+            url = resolve_preview(item)
+            path = ensure_cached(url) if url else None
+            ansi = to_ansi(path, width=48, height=14) if path else ""
+        if not item.readme:
+            item.readme = fetch_readme(item)
+        self.call_from_thread(self._apply_about, key, ansi, fetch_image)
+
+    def _apply_about(self, key: str, ansi: str, fetch_image: bool = True) -> None:
+        item = next((row for row in self.items if row.key == key), None)
+        if item is None:
+            return
+        if fetch_image:
+            self._shots[key] = ansi or ""
         if self.selected and self.selected.key == key:
             self._render_detail(item, settled=True)
 
