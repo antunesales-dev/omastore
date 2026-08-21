@@ -7,9 +7,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from urllib.parse import urlparse
+
 from omastore.catalog import DEFAULT_TTL, cache_dir
 from omastore.local import git_head, installed_plugin_path, installed_theme_path
 from omastore.models import Item
+from omastore.safety import allowed_fetch_url, safe_cli_arg
 
 CACHE_NAME = "upstream-revs.json"
 GIT_TIMEOUT = 20
@@ -115,14 +118,22 @@ def _revs_match(left: str, right: str) -> bool:
 
 
 def git_ls_remote(repo: str, *, ttl: int = DEFAULT_TTL) -> str:
-    if not repo:
+    if not repo or str(repo).startswith("-"):
+        return ""
+    repo = str(repo).strip()
+    if not safe_cli_arg(repo):
+        return ""
+    parsed = urlparse(repo)
+    host = (parsed.hostname or "").lower()
+    github_https = parsed.scheme == "https" and host == "github.com"
+    if not github_https and not allowed_fetch_url(repo):
         return ""
     cached = _cached_rev(repo, ttl=ttl)
     if cached:
         return cached
     try:
         completed = subprocess.run(
-            ["git", "ls-remote", repo, "HEAD"],
+            ["git", "ls-remote", "--", repo, "HEAD"],
             check=False,
             text=True,
             capture_output=True,

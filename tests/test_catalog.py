@@ -33,3 +33,31 @@ def test_overlay_marks_current_and_extra() -> None:
     assert out["vantablack"].installed
     assert out["lumon"].extra
     assert out["omarchy.clock"].enabled
+
+
+def test_overlay_matches_repo_basename_without_duplicate() -> None:
+    items = [
+        Item(
+            kind="theme",
+            id="lumon",
+            name="Lumon",
+            repo="https://github.com/OldJobobo/omarchy-lumon-theme",
+        ),
+    ]
+    local = LocalState(extra_slugs={"omarchy-lumon-theme"})
+    out = overlay(items, local)
+    assert [item.id for item in out] == ["lumon"]
+    assert out[0].installed
+    assert out[0].extra
+    assert not out[0].local_only
+    assert not out[0].current
+
+
+def test_overlay_matches_slugified_directory_name() -> None:
+    items = [Item(kind="theme", id="tokyo-night", name="Tokyo Night")]
+    local = LocalState(extra_slugs={"tokyo night", "tokyo-night"})
+    out = overlay(items, local)
+    assert [item.id for item in out] == ["tokyo-night"]
+    assert out[0].installed
+    assert out[0].extra
+    assert not out[0].local_only

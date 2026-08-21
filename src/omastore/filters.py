@@ -173,7 +173,12 @@ def _stamp(value: str) -> float:
 def sort_key(item: Item, sort: str, tab: Tab) -> tuple:
     if tab == "plugins":
         group = 0 if item.installed else 1
-        return (group, item.name.lower(), item.id.lower())
+        if sort == "name":
+            return (group, item.name.lower(), item.id.lower())
+        if sort == "recent":
+            return (group, -_stamp(item.listed_at), item.name.lower())
+        stars = item.stars if item.stars is not None else -1
+        return (group, -stars, item.name.lower())
     installed = bool(item.installed or item.current)
     base = (
         0 if item.current else 1,

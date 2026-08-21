@@ -42,15 +42,15 @@ def _write_json(path: Path, payload: Any) -> None:
 
 
 def fetch_json(url: str, timeout: float = 30) -> Any:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+    from omastore.safety import fetch_bytes
+
+    return json.loads(fetch_bytes(url, timeout=timeout).decode("utf-8"))
 
 
 def fetch_text(url: str, timeout: float = 20) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read().decode("utf-8", errors="replace")
+    from omastore.safety import fetch_text as _fetch_text
+
+    return _fetch_text(url, timeout=timeout)
 
 
 def load_cached(name: str, url: str, *, force: bool = False, ttl: int = DEFAULT_TTL) -> Any:
