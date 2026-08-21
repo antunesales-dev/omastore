@@ -18,13 +18,35 @@ from omastore.actions import (
     disable_plugin,
     enable_plugin,
     install,
+    install_pack,
     remove,
+    remove_pack,
     update,
 )
 from omastore.catalog import fetch_readme, load_store
 from omastore.credits import ABOUT, THEME_STORE_AUTHOR, PLUGIN_STORE_AUTHOR
-from omastore.filters import Query, apply_query, cycle_sort, cycle_source, cycle_status, parse_search
+from omastore.filters import (
+    Query,
+    apply_query,
+    clamp_query,
+    cycle_sort,
+    cycle_source,
+    cycle_status,
+    cycle_verified,
+    parse_search,
+)
 from omastore.models import Item, Tab
+from omastore.notice import NOTICE
+from omastore.packs import (
+    PACK_CREDIT,
+    PACKS,
+    Pack,
+    describe_pack_install,
+    describe_pack_remove,
+    get_pack,
+    pack_markdown,
+    pack_matches,
+)
 from omastore.theme import omarchy_theme_css
 
 PALETTE_KEYS = [
@@ -52,6 +74,26 @@ PALETTE_KEYS = [
 
 def sort_items(items: list[Item], tab: Tab, query: Query | None = None) -> list[Item]:
     return apply_query(items, query or Query(), tab)
+
+
+def pack_prompt(pack: Pack, items: list[Item], width: int = 40) -> Text:
+    members = pack.members(items)
+    listed = len(members)
+    installed = sum(1 for item in members if item.installed)
+    text = Text()
+    if listed and installed == listed:
+        mark, style = "●", "cyan"
+    elif installed:
+        mark, style = "●", "cyan"
+    else:
+        mark, style = "○", "dim"
+    text.append(f"{mark} ", style=style)
+    count = f"{installed}/{listed} on"
+    name_width = max(8, width - 2 - (len(count) + 1))
+    text.append(set_cell_size(pack.title, name_width))
+    text.append(" ")
+    text.append(count, style="dim")
+    return text
 
 
 def list_prompt(item: Item, width: int = 40) -> Text:
@@ -155,7 +197,31 @@ def confirm_prompt(action: str, item: Item) -> str:
     return "\n".join(lines)
 
 
-def filter_bar(query: Query) -> str:
+def filter_bar(query: Query, tab: Tab = "themes") -> str:
+    if tab == "plugins":
+        status = {
+            "all": "all",
+            "installed": "installed",
+            "not-installed": "not installed",
+            "uninstalled": "not installed",
+            "available": "not installed",
+        }.get(query.status, query.status)
+        source = {
+            "all": "all sources",
+            "community": "community",
+            "builtin": "built-in",
+        }.get(query.source, query.source)
+        verified = {
+            "all": "all verification",
+            "yes": "verified",
+            "no": "unverified",
+            "unverified": "unverified",
+        }.get(query.verified, query.verified)
+        rating = f"{query.min_stars}+ stars" if query.min_stars else query.sort
+        return (
+            f"{status} · {source} · {verified} · {rating}"
+            "     f installed  v built-in  y verified  s rating"
+        )
     bits: list[str] = []
     if query.status != "all":
         bits.append(query.status)
@@ -169,6 +235,8 @@ def filter_bar(query: Query) -> str:
         bits.append(query.tag)
     if query.verified != "all":
         bits.append(f"verified:{query.verified}")
+    if query.min_stars:
+        bits.append(f"{query.min_stars}+ stars")
     bits.append(query.sort)
     return f"{' · '.join(bits)}     f filter   v source   s sort"
 
@@ -258,6 +326,23 @@ def next_shot_zoom(current: float, direction: int) -> float:
         if step < current - 0.01:
             return step
     return SHOT_ZOOMS[0]
+
+
+class NoticeScreen(ModalScreen[str | None]):
+    BINDINGS = [
+        Binding("y,enter", "continue", "Continue", show=False),
+        Binding("e", "everyday", "Everyday", show=False),
+        Binding("escape", "continue", "Continue", show=False),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Static(NOTICE + "\n\n[y] continue   [e] everyday pack", id="notice", markup=False)
+
+    def action_continue(self) -> None:
+        self.dismiss("ok")
+
+    def action_everyday(self) -> None:
+        self.dismiss("everyday")
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -398,6 +483,7 @@ class OmaStoreApp(App[None]):
         Binding("1", "set_tab('themes')", "Themes", show=False),
         Binding("2", "set_tab('plugins')", "Plugins", show=False),
         Binding("3", "set_tab('installed')", "Installed", show=False),
+        Binding("4", "set_tab('packs')", "Packs", show=False),
         Binding("i", "do_install", "Install", show=False),
         Binding("t", "try_theme", "Try", show=False),
         Binding("b", "revert_theme", "Back", show=False),
@@ -412,6 +498,7 @@ class OmaStoreApp(App[None]):
         Binding("r", "refresh", "Refresh", show=False),
         Binding("f", "cycle_status", "Filter", show=True),
         Binding("v", "cycle_source", "Source", show=False),
+        Binding("y", "cycle_verified", "Verified", show=False),
         Binding("s", "cycle_sort", "Sort", show=False),
         Binding("question_mark", "credits", "Credits", show=True),
         Binding("q", "quit", "Quit", show=True),
@@ -426,7 +513,9 @@ class OmaStoreApp(App[None]):
         self.search = self.filters.text
         self.items: list[Item] = []
         self.shown: list[Item] = []
+        self.pack_shown: list[Pack] = []
         self.selected: Item | None = None
+        self.selected_pack: Pack | None = None
         self.status_text = "loading catalogs…"
         self._readme_key = ""
         self._list_pointer = False
@@ -443,6 +532,7 @@ class OmaStoreApp(App[None]):
                 Static("1 themes", id="tab-themes", classes="tab active"),
                 Static("2 plugins", id="tab-plugins", classes="tab"),
                 Static("3 installed", id="tab-installed", classes="tab"),
+                Static("4 packs", id="tab-packs", classes="tab"),
                 Input(
                     placeholder="Search  ·  /  to type",
                     id="search",
@@ -476,6 +566,24 @@ class OmaStoreApp(App[None]):
             self.query_one("#search", Input).value = self.search
         self.query_one("#list", OptionList).focus()
         self.load_items()
+        self._maybe_notice()
+
+    def _maybe_notice(self) -> None:
+        from omastore import notice
+
+        if notice.seen():
+            return
+        self.push_screen(NoticeScreen(), self._notice_done)
+
+    def _notice_done(self, result: str | None) -> None:
+        from omastore import notice
+
+        notice.mark_seen()
+        if result == "everyday":
+            self.action_set_tab("packs")
+            pack = get_pack("everyday")
+            if pack is not None:
+                self._select_pack(pack)
 
     def action_focus_search(self) -> None:
         self.query_one("#search", Input).focus()
@@ -485,6 +593,7 @@ class OmaStoreApp(App[None]):
 
     def action_set_tab(self, tab: Tab) -> None:
         self.tab = tab
+        self.filters = clamp_query(self.filters, tab)
         self._paint_tabs()
         self._rebuild_list()
         self.query_one("#list", OptionList).focus()
@@ -501,6 +610,10 @@ class OmaStoreApp(App[None]):
     def _click_installed(self) -> None:
         self.action_set_tab("installed")
 
+    @on(Click, "#tab-packs")
+    def _click_packs(self) -> None:
+        self.action_set_tab("packs")
+
     def action_refresh(self) -> None:
         self.status_text = "refreshing catalogs…"
         self._status()
@@ -510,11 +623,15 @@ class OmaStoreApp(App[None]):
         self.push_screen(CreditsScreen())
 
     def action_cycle_status(self) -> None:
-        self.filters = cycle_status(self.filters)
+        self.filters = cycle_status(self.filters, self.tab)
         self._rebuild_list()
 
     def action_cycle_source(self) -> None:
         self.filters = cycle_source(self.filters)
+        self._rebuild_list()
+
+    def action_cycle_verified(self) -> None:
+        self.filters = cycle_verified(self.filters)
         self._rebuild_list()
 
     def action_cycle_sort(self) -> None:
@@ -522,6 +639,9 @@ class OmaStoreApp(App[None]):
         self._rebuild_list()
 
     def action_do_install(self) -> None:
+        if self.tab == "packs":
+            self._act_pack("install")
+            return
         self._act("install")
 
     def action_try_theme(self) -> None:
@@ -598,6 +718,12 @@ class OmaStoreApp(App[None]):
         self.push_screen(ShotScreen(path, item.name))
 
     def _open_link(self, target: str) -> None:
+        if self.tab == "packs" or (self.selected is None and self.selected_pack is not None):
+            from omastore.links import PLUGIN_CATALOG, open_url
+
+            result = open_url(PLUGIN_CATALOG)
+            self.notify(str(result.get("message") or target))
+            return
         item = self.selected
         if item is None:
             return
@@ -619,6 +745,9 @@ class OmaStoreApp(App[None]):
         self._act("update")
 
     def action_do_remove(self) -> None:
+        if self.tab == "packs":
+            self._act_pack("remove")
+            return
         self._act("remove")
 
     @on(Input.Changed, "#search")
@@ -660,6 +789,9 @@ class OmaStoreApp(App[None]):
         self._activate_selected()
 
     def _activate_selected(self) -> None:
+        if self.tab == "packs":
+            self._act_pack("install")
+            return
         item = self.selected
         if item is None:
             return
@@ -692,11 +824,15 @@ class OmaStoreApp(App[None]):
         self._rebuild_list()
 
     def _paint_tabs(self) -> None:
-        for name in ("themes", "plugins", "installed"):
+        for name in ("themes", "plugins", "installed", "packs"):
             widget = self.query_one(f"#tab-{name}", Static)
             widget.set_class(name == self.tab, "active")
 
     def _rebuild_list(self) -> None:
+        if self.tab == "packs":
+            self._rebuild_packs()
+            return
+        self.selected_pack = None
         previous = self.selected.key if self.selected else ""
         self.shown = apply_query(self.items, self._active_query(), self.tab)
         listing = self.query_one("#list", OptionList)
@@ -718,7 +854,7 @@ class OmaStoreApp(App[None]):
             self._cancel_about()
             self._render_detail(None)
         active = self._active_query()
-        self.query_one("#filters", Static).update(filter_bar(active))
+        self.query_one("#filters", Static).update(filter_bar(active, self.tab))
         extra = ""
         session = self._try_session
         if session:
@@ -743,7 +879,49 @@ class OmaStoreApp(App[None]):
             f"{self.status_text}  ·  {len(self.shown)} shown{extra}    {credit}"
         )
 
+    def _rebuild_packs(self) -> None:
+        previous = self.selected_pack.id if self.selected_pack else ""
+        text = self._active_query().text
+        shown_packs = [pack for pack in PACKS if pack_matches(pack, text, self.items)]
+        self.pack_shown = shown_packs
+        self.shown = []
+        listing = self.query_one("#list", OptionList)
+        row_width = listing.size.width or 40
+        if row_width > 4:
+            row_width -= 3
+        options = [
+            Option(pack_prompt(pack, self.items, row_width), id=f"pack__{pack.id}")
+            for pack in shown_packs
+        ]
+        listing.clear_options()
+        if options:
+            listing.add_options(options)
+            index = next((i for i, pack in enumerate(shown_packs) if pack.id == previous), 0)
+            listing.highlighted = index
+            self._select_pack(shown_packs[index])
+        else:
+            self.selected = None
+            self.selected_pack = None
+            self._cancel_about()
+            self._render_pack_detail(None)
+        self.query_one("#filters", Static).update(PACK_CREDIT)
+        credit = f"{THEME_STORE_AUTHOR} · {PLUGIN_STORE_AUTHOR}  ?"
+        self.query_one("#status", Static).update(
+            f"{self.status_text}  ·  {len(shown_packs)} packs    {credit}"
+        )
+
+    def _select_pack(self, pack: Pack | None) -> None:
+        self.selected = None
+        self.selected_pack = pack
+        self._cancel_about()
+        self._render_pack_detail(pack)
+
     def _select_key(self, key: str, *, immediate: bool = False) -> None:
+        if key.startswith("pack__") or self.tab == "packs":
+            pack = get_pack(key.removeprefix("pack__"))
+            self._select_pack(pack)
+            return
+        self.selected_pack = None
         key = key.replace("__", ":", 1)
         item = next((row for row in self.shown if row.key == key), None)
         self.selected = item
@@ -794,7 +972,7 @@ class OmaStoreApp(App[None]):
         palette = self.query_one("#palette", Static)
         readme = self.query_one("#readme", Markdown)
         if item is None:
-            meta.update("No matches.\nSearch, press 1 / 2 / 3, or f to filter.")
+            meta.update("No matches.\nSearch, press 1 / 2 / 3 / 4, or f to filter.")
             palette.update("")
             palette.display = False
             self._set_shot("")
@@ -832,6 +1010,37 @@ class OmaStoreApp(App[None]):
         else:
             self._set_shot("")
             readme.update(item_markdown(item, include_readme=False, loading=True))
+
+    def _render_pack_detail(self, pack: Pack | None) -> None:
+        meta = self.query_one("#meta", Static)
+        palette = self.query_one("#palette", Static)
+        readme = self.query_one("#readme", Markdown)
+        palette.update("")
+        palette.display = False
+        self._set_shot("")
+        if pack is None:
+            meta.update("No packs match.\nPress 1 / 2 / 3 / 4, or / to search.")
+            readme.update("_Try another search._")
+            return
+        listed, pending = pack.counts(self.items)
+        removable = len(pack.removable(self.items))
+        header = Text()
+        header.append(pack.title, style="bold")
+        header.append("\n")
+        header.append(
+            f"suggested pack  ·  {removable} installed of {listed}  ·  {pending} to install",
+            style="dim",
+        )
+        header.append("\n")
+        hints: list[str] = []
+        if pending:
+            hints.append("[i] install remaining")
+        if removable:
+            hints.append("[x] remove installed")
+        hints.append("[c] catalog")
+        header.append("  ".join(hints), style="bold")
+        meta.update(header)
+        readme.update(pack_markdown(pack, self.items))
 
     @work(thread=True, exclusive=True, group="about")
     def _load_about(self, key: str, fetch_image: bool = True) -> None:
@@ -885,6 +1094,61 @@ class OmaStoreApp(App[None]):
             self.push_screen(ConfirmScreen(confirm_prompt(name, item)), confirmed)
             return
         self._run_action(name, item)
+
+    def _act_pack(self, name: str = "install") -> None:
+        pack = self.selected_pack
+        if pack is None:
+            return
+        if name == "install":
+            rows = pack.pending(self.items)
+            prompt = describe_pack_install
+            runner = self._run_pack_install
+            empty = f"{pack.title}: nothing to install"
+        elif name == "remove":
+            rows = pack.removable(self.items)
+            prompt = describe_pack_remove
+            runner = self._run_pack_remove
+            empty = f"{pack.title}: nothing to remove"
+        else:
+            return
+        if not rows:
+            self.notify(empty)
+            return
+
+        def confirmed(ok: bool | None, target=pack, members=rows, run=runner) -> None:
+            if ok:
+                run(target, members)
+
+        self.push_screen(ConfirmScreen(prompt(pack, rows)), confirmed)
+
+    @work(thread=True, exclusive=True, group="action")
+    def _run_pack_install(self, pack: Pack, pending: list[Item]) -> None:
+        results = install_pack(pending)
+        self.call_from_thread(self._pack_action_done, pack, "install", results)
+
+    @work(thread=True, exclusive=True, group="action")
+    def _run_pack_remove(self, pack: Pack, rows: list[Item]) -> None:
+        results = remove_pack(rows)
+        self.call_from_thread(self._pack_action_done, pack, "remove", results)
+
+    def _pack_action_done(
+        self,
+        pack: Pack,
+        name: str,
+        results: list[tuple[Item, ActionResult]],
+    ) -> None:
+        done = "installed" if name == "install" else "removed"
+        empty = "install" if name == "install" else "remove"
+        if not results:
+            self.notify(f"{pack.title}: nothing to {empty}")
+            return
+        failed = next((item for item, result in results if not result.ok), None)
+        if failed is not None:
+            result = next(result for item, result in results if item is failed)
+            self.notify(f"{pack.title} stopped at {failed.name}: {result.message}", severity="error")
+        else:
+            self.notify(f"{pack.title}: {done} {len(results)}")
+        self.load_items()
 
     @work(thread=True, exclusive=True, group="action")
     def _run_action(self, name: str, item: Item) -> None:

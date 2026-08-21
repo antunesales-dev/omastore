@@ -63,6 +63,14 @@ The plugin marketplace credits [bjarneo](https://github.com/bjarneo)
 for interface inspiration and limehawk's theme site for its
 submission workflow.
 
+## Suggested packs
+
+Everyday, Developer, Finance, Designer, Music, Artist, and Gamer
+are short hand-picked lists from HANCORE's catalog: verified plugins
+only. They are suggestions, not a new catalog, and not a HANCORE
+feature. The listings stay theirs. You still install with the
+official `omarchy` commands.
+
 ## Authors
 
 Every theme and plugin belongs to the person who published it.

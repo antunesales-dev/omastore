@@ -6,6 +6,7 @@ from omastore.app import (
     format_action_hints,
     item_markdown,
     next_shot_zoom,
+    pack_prompt,
     palette_text,
     sort_items,
 )
@@ -203,6 +204,13 @@ def test_filter_bar_is_readable() -> None:
     bar = filter_bar(Query(status="installed", sort="name"))
     assert "installed" in bar
     assert "name" in bar
+    plugins = filter_bar(Query(), "plugins")
+    assert "f installed" in plugins
+    assert "y verified" in plugins
+    assert "v built-in" in plugins
+    assert "s rating" in plugins
+    not_installed = filter_bar(Query(status="not-installed"), "plugins")
+    assert "not installed" in not_installed
 
 
 def test_action_groups_split_do_and_open() -> None:
@@ -399,8 +407,244 @@ def test_workers_exclusive_groups() -> None:
     try_src = inspect.getsource(OmaStoreApp._run_try)
     revert_src = inspect.getsource(OmaStoreApp._run_revert)
     action_src = inspect.getsource(OmaStoreApp._run_action)
+    pack_src = inspect.getsource(OmaStoreApp._run_pack_install)
+    pack_remove_src = inspect.getsource(OmaStoreApp._run_pack_remove)
     rebuild_src = inspect.getsource(OmaStoreApp._rebuild_list)
     assert 'exclusive=True' in try_src and 'group="theme-preview"' in try_src
     assert 'exclusive=False' in revert_src and 'group="theme-preview"' in revert_src
     assert 'exclusive=True' in action_src and 'group="action"' in action_src
+    assert 'exclusive=True' in pack_src and 'group="action"' in pack_src
+    assert 'exclusive=True' in pack_remove_src and 'group="action"' in pack_remove_src
     assert "preview_status" not in rebuild_src
+
+
+def test_pack_binding_exists() -> None:
+    from omastore.app import OmaStoreApp
+
+    assert any(binding.key == "4" and "packs" in binding.action for binding in OmaStoreApp.BINDINGS)
+
+
+def test_pack_prompt_counts() -> None:
+    from omastore.packs import get_pack
+
+    pack = get_pack("finance")
+    open_ = Item(
+        kind="plugin",
+        id="io.github.5d0tal1gat0r.stocks",
+        name="Stocks",
+        verification="verified",
+        description="stock widget",
+        category="Widgets",
+        install_url="https://github.com/a/stocks",
+    )
+    have = Item(
+        kind="plugin",
+        id="io.github.guettoblasterr.crypto-market-pulse",
+        name="Crypto",
+        verification="verified",
+        description="crypto",
+        category="Widgets",
+        installed=True,
+    )
+    line = pack_prompt(pack, [open_, have], width=28).plain
+    assert "Finance" in line
+    assert "1/2 on" in line
+    assert "●" in line
+
+
+def test_pack_click_never_installs() -> None:
+    from types import SimpleNamespace
+
+    from omastore.app import OmaStoreApp
+    from omastore.packs import get_pack
+
+    app = OmaStoreApp(start_tab="packs")
+    app.tab = "packs"
+    app.selected_pack = get_pack("everyday")
+    acts: list[str] = []
+    app._act_pack = lambda *_args, **_kwargs: acts.append("pack")  # type: ignore[method-assign]
+    app._select_key = lambda *args, **kwargs: None  # type: ignore[method-assign]
+
+    app._click_list()
+    event = SimpleNamespace(option_id="pack__everyday")
+    app.on_option_selected(event)  # type: ignore[arg-type]
+    assert acts == []
+    app.on_option_selected(event)  # type: ignore[arg-type]
+    assert acts == ["pack"]
+
+
+def test_act_pack_confirms_all_members() -> None:
+    from omastore.app import ConfirmScreen, OmaStoreApp
+    from omastore.packs import get_pack
+
+    app = OmaStoreApp()
+    app.tab = "packs"
+    app.selected_pack = get_pack("finance")
+    app.items = [
+        Item(
+            kind="plugin",
+            id="io.github.5d0tal1gat0r.stocks",
+            name="Stocks",
+            verification="verified",
+            description="stock widget",
+            category="Widgets",
+            install_url="https://github.com/a/stocks",
+            repo="https://github.com/a/stocks",
+        )
+    ]
+    pushed: list[object] = []
+    ran: list[object] = []
+    app.push_screen = lambda screen, callback=None: pushed.append(screen)  # type: ignore[method-assign]
+    app._run_pack_install = lambda *args: ran.append(args)  # type: ignore[method-assign]
+    app._act_pack()
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], ConfirmScreen)
+    assert "Stocks" in pushed[0].prompt
+    assert "https://github.com/a/stocks" in pushed[0].prompt
+    assert "HANCORE" in pushed[0].prompt
+    assert ran == []
+
+
+def test_act_pack_remove_confirms_installed_members() -> None:
+    from omastore.app import ConfirmScreen, OmaStoreApp
+    from omastore.packs import get_pack
+
+    app = OmaStoreApp()
+    app.tab = "packs"
+    app.selected_pack = get_pack("finance")
+    app.items = [
+        Item(
+            kind="plugin",
+            id="io.github.5d0tal1gat0r.stocks",
+            name="Stocks",
+            verification="verified",
+            description="stock widget",
+            category="Widgets",
+            installed=True,
+            repo="https://github.com/a/stocks",
+        )
+    ]
+    pushed: list[object] = []
+    ran: list[object] = []
+    app.push_screen = lambda screen, callback=None: pushed.append(screen)  # type: ignore[method-assign]
+    app._run_pack_remove = lambda *args: ran.append(args)  # type: ignore[method-assign]
+    app._act_pack("remove")
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], ConfirmScreen)
+    assert "remove 1 plugin from Finance?" in pushed[0].prompt
+    assert "Stocks" in pushed[0].prompt
+    assert "https://github.com/a/stocks" in pushed[0].prompt
+    assert "also in another pack" in pushed[0].prompt
+    assert ran == []
+
+
+def test_act_pack_nothing_to_remove() -> None:
+    from omastore.app import OmaStoreApp
+    from omastore.packs import get_pack
+
+    app = OmaStoreApp()
+    app.tab = "packs"
+    app.selected_pack = get_pack("finance")
+    app.items = [
+        Item(
+            kind="plugin",
+            id="io.github.5d0tal1gat0r.stocks",
+            name="Stocks",
+            verification="verified",
+            description="stock widget",
+            category="Widgets",
+            install_url="https://github.com/a/stocks",
+        )
+    ]
+    notes: list[str] = []
+    pushed: list[object] = []
+    app.notify = lambda message, **_kwargs: notes.append(str(message))  # type: ignore[method-assign]
+    app.push_screen = lambda screen, callback=None: pushed.append(screen)  # type: ignore[method-assign]
+    app._act_pack("remove")
+    assert pushed == []
+    assert notes
+    assert "nothing to remove" in notes[0]
+
+
+def test_act_pack_nothing_to_install() -> None:
+    from omastore.app import OmaStoreApp
+    from omastore.packs import get_pack
+
+    app = OmaStoreApp()
+    app.tab = "packs"
+    app.selected_pack = get_pack("finance")
+    app.items = [
+        Item(
+            kind="plugin",
+            id="io.github.5d0tal1gat0r.stocks",
+            name="Stocks",
+            verification="verified",
+            description="stock widget",
+            category="Widgets",
+            installed=True,
+        )
+    ]
+    notes: list[str] = []
+    pushed: list[object] = []
+    app.notify = lambda message, **_kwargs: notes.append(str(message))  # type: ignore[method-assign]
+    app.push_screen = lambda screen, callback=None: pushed.append(screen)  # type: ignore[method-assign]
+    app._act_pack()
+    assert pushed == []
+    assert notes
+    assert "nothing to install" in notes[0]
+
+
+def test_notice_screen_disables_markup() -> None:
+    from omastore.app import NoticeScreen
+
+    screen = NoticeScreen()
+    static = next(screen.compose())
+    assert static._render_markup is False
+    body = str(static._Static__content)
+    assert "unsandboxed" in body.lower()
+    assert "limehawk" in body.lower()
+    assert "HANCORE" in body
+    assert "[y] continue" in body
+    assert "[e] everyday pack" in body
+
+
+def test_maybe_notice_skipped_when_seen(monkeypatch) -> None:
+    from omastore.app import OmaStoreApp
+    from omastore import notice
+
+    monkeypatch.setattr(notice, "seen", lambda: True)
+    app = OmaStoreApp()
+    pushed: list[object] = []
+    app.push_screen = lambda *args, **kwargs: pushed.append(args)  # type: ignore[method-assign]
+    app._maybe_notice()
+    assert pushed == []
+
+
+def test_maybe_notice_shows_when_unseen(monkeypatch) -> None:
+    from omastore.app import NoticeScreen, OmaStoreApp
+    from omastore import notice
+
+    monkeypatch.setattr(notice, "seen", lambda: False)
+    app = OmaStoreApp()
+    pushed: list[object] = []
+    app.push_screen = lambda screen, callback=None: pushed.append(screen)  # type: ignore[method-assign]
+    app._maybe_notice()
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], NoticeScreen)
+
+
+def test_notice_everyday_opens_packs_tab(monkeypatch) -> None:
+    from omastore.app import OmaStoreApp
+    from omastore import notice
+
+    marked: list[str] = []
+    monkeypatch.setattr(notice, "mark_seen", lambda: marked.append("seen"))
+    app = OmaStoreApp()
+    tabs: list[str] = []
+    selected: list[str] = []
+    app.action_set_tab = lambda tab: tabs.append(tab)  # type: ignore[method-assign]
+    app._select_pack = lambda pack: selected.append(pack.id if pack else "")  # type: ignore[method-assign]
+    app._notice_done("everyday")
+    assert marked == ["seen"]
+    assert tabs == ["packs"]
+    assert selected == ["everyday"]

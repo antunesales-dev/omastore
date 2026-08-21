@@ -9,7 +9,7 @@ $ omastore
 ```
 
 ```
-Omastore  1 themes  2 plugins  3 installed     Search  ·  /
+Omastore  1 themes  2 plugins  3 installed  4 packs     Search  ·  /
 
  stars     f filter   v source   s sort
 
@@ -25,10 +25,10 @@ Not affiliated with Omarchy, 37signals, or the community catalog sites. Those si
 It is meant to stay simple.
 
 1. Open `omastore`.
-2. Type `/` and search, or press `1` / `2` / `3` for themes, plugins, or what you already have.
+2. Type `/` and search, or press `1` / `2` / `3` / `4` for themes, plugins, installed, or suggested packs.
 3. Filter with `f` (installed / available / extra / stock), `v` (community / built-in), and `s` (stars / name / recent). You can also type prefixes in the search box: `hue:blue`, `tag:bar`, `is:available`, `src:community`.
-4. Installed themes show a filled **●** (green if it is the current theme, cyan otherwise) and sort above catalog-only rows. Plugin rows show a green **✓** when the HANCORE catalog verified them, or a yellow **−** when they are unverified. Filter with `is:installed`, `verified:yes`, or `--verified`.
-5. Press `enter` (or `i`) to install. omastore asks first, then runs the official `omarchy` command.
+4. Installed themes show a filled **●** (green if it is the current theme, cyan otherwise) and sort above catalog-only rows. Plugin rows show a green **✓** when the HANCORE catalog verified them, or a yellow **−** when they are unverified. On the plugins tab, `f` is installed / not installed, `v` is community / built-in, `y` is verified / unverified, and `s` sorts by rating. You can also type `is:installed`, `is:not-installed`, `src:builtin`, `verified:yes`, `stars:10`.
+5. Press `enter` (or `i`) to install. omastore asks first, then runs the official `omarchy` command. Packs are hand-picked verified plugins from the HANCORE catalog (Everyday, Developer, Finance, Designer, Music, Artist, Gamer), not a keyword dump and not a new store. In a pack, **●** is already installed and **○** is still to install. `i` confirms every remaining plugin, then installs them one by one. `x` confirms every installed member, then removes them one by one. A plugin that also sits in another pack is still removed.
 
 You do not browse a new store. You browse **their** catalogs, then Omarchy does the install. How we relate to those projects is in [COMMUNITY.md](COMMUNITY.md).
 
@@ -79,6 +79,11 @@ Then Super + Space and type **Omastore**, or Super + Ctrl + O. It opens as a flo
 omastore                          # TUI
 omastore plugins                  # TUI on the plugins tab
 omastore tui --tab plugins
+omastore tui --tab packs
+omastore packs                    # list suggested plugin packs
+omastore pack everyday            # show the Everyday pack
+omastore pack install everyday --yes
+omastore pack remove everyday --yes
 omastore search lumon
 omastore search overview --kind plugin
 omastore search hue:blue is:available --sort stars
@@ -105,10 +110,11 @@ omastore about
 | Key | Action |
 | --- | --- |
 | `/` | search (also `hue:blue`, `tag:bar`, `is:available`) |
-| `1` `2` `3` | themes / plugins / installed |
-| `f` | cycle status filter |
+| `1` `2` `3` `4` | themes / plugins / installed / packs |
+| `f` | cycle filter (plugins: all / installed / not installed) |
 | `v` | cycle community / built-in |
-| `s` | cycle sort |
+| `y` | cycle verified / unverified (plugins) |
+| `s` | cycle sort (stars = rating) |
 | `enter` | install, apply, or enable |
 | `i` | install |
 | `t` / `b` | try an installed theme (does not freeze the list) / restore the previous one |
@@ -117,7 +123,7 @@ omastore about
 | `a` | apply theme |
 | `e` / `d` | enable / disable plugin |
 | `u` | update |
-| `x` | remove |
+| `x` | remove (on a pack: every installed member) |
 | `r` | refresh catalogs |
 | `?` | credits |
 | `q` | quit |
@@ -140,7 +146,7 @@ omarchy theme install <url>
 omarchy plugin add <url> --enable --yes
 ```
 
-Review the repository before you confirm.
+Review the repository before you confirm. The first launch shows this once; `[y]` continues, `[e]` opens the Everyday pack.
 
 ## Develop
 

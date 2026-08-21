@@ -1,6 +1,6 @@
 import subprocess
 
-from omastore.actions import apply_theme, enable_plugin, install
+from omastore.actions import ActionResult, apply_theme, enable_plugin, install, install_pack, remove_pack
 from omastore.models import Item
 
 
@@ -61,6 +61,71 @@ def test_install_refuses_disallowed_url(monkeypatch) -> None:
     result = install(remote)
     assert result.ok is False
     assert result.message == "refused install url"
+
+
+def test_install_pack_stops_on_failure(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_install(item, *, dry_run=False):
+        calls.append(item.id)
+        if item.id == "b":
+            return ActionResult(False, [], "", "boom")
+        return ActionResult(True, [], "ok", "")
+
+    monkeypatch.setattr("omastore.actions.install", fake_install)
+    a = _plugin(id="a", name="A")
+    b = _plugin(id="b", name="B")
+    c = _plugin(id="c", name="C")
+    results = install_pack([a, b, c])
+    assert [item.id for item, _ in results] == ["a", "b"]
+    assert calls == ["a", "b"]
+    assert results[1][1].ok is False
+    assert results[1][1].message == "boom"
+
+
+def test_install_pack_skips_already_installed(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "omastore.actions.install",
+        lambda item, *, dry_run=False: calls.append(item.id) or ActionResult(True, [], "ok", ""),
+    )
+    have = _plugin(id="have", name="Have", installed=True)
+    open_ = _plugin(id="open", name="Open")
+    results = install_pack([have, open_])
+    assert [item.id for item, _ in results] == ["open"]
+    assert calls == ["open"]
+
+
+def test_remove_pack_stops_on_failure(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_remove(item, *, dry_run=False):
+        calls.append(item.id)
+        if item.id == "b":
+            return ActionResult(False, [], "", "boom")
+        return ActionResult(True, [], "ok", "")
+
+    monkeypatch.setattr("omastore.actions.remove", fake_remove)
+    a = _plugin(id="a", name="A", installed=True)
+    b = _plugin(id="b", name="B", installed=True)
+    c = _plugin(id="c", name="C", installed=True)
+    results = remove_pack([a, b, c])
+    assert [item.id for item, _ in results] == ["a", "b"]
+    assert calls == ["a", "b"]
+    assert results[1][1].ok is False
+
+
+def test_remove_pack_skips_not_installed(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "omastore.actions.remove",
+        lambda item, *, dry_run=False: calls.append(item.id) or ActionResult(True, [], "ok", ""),
+    )
+    missing = _plugin(id="missing", name="Missing")
+    have = _plugin(id="have", name="Have", installed=True)
+    results = remove_pack([missing, have])
+    assert [item.id for item, _ in results] == ["have"]
+    assert calls == ["have"]
 
 
 def test_apply_plugin_fails(monkeypatch) -> None:

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 Kind = Literal["theme", "plugin"]
-Tab = Literal["themes", "plugins", "installed"]
+Tab = Literal["themes", "plugins", "installed", "packs"]
 
 
 def slugify(value: str) -> str:
