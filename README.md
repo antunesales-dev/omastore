@@ -111,11 +111,11 @@ omastore about
 | --- | --- |
 | `/` | search (also `hue:blue`, `tag:bar`, `is:available`) |
 | `1` `2` `3` `4` | themes / plugins / installed / packs |
-| `f` | cycle filter (plugins: all / installed / not installed) |
-| `v` | cycle community / built-in |
-| `y` | cycle verified / unverified (plugins) |
-| `s` | cycle sort (stars = rating) |
-| `0` | reset filters (does nothing while typing in search) |
+| `f` | installed / not-installed / all |
+| `v` | community / built-in / all |
+| `y` | verified / unverified / all (plugins tab only) |
+| `s` | sort: stars, name, recent |
+| `0` | reset filters (keeps the current sort) |
 | `enter` | install, apply, or enable |
 | `i` | install |
 | `t` / `b` | try an installed theme (does not freeze the list) / restore the previous one |

@@ -139,7 +139,7 @@ def test_reset_filters_keeps_search_text() -> None:
     assert reset.status == "all"
     assert reset.source == "all"
     assert reset.verified == "all"
-    assert reset.sort == "stars"
+    assert reset.sort == "name"
     assert reset.min_stars == 0
 
 

@@ -104,6 +104,10 @@ def disable_plugin(item: Item, *, dry_run: bool = False) -> ActionResult:
     operand = _operand(item.id, error="refused plugin id")
     if isinstance(operand, ActionResult):
         return operand
+    if not dry_run:
+        from omastore.local import restore_hidden_bar_widgets
+
+        restore_hidden_bar_widgets(item.id)
     return _run(["plugin", "disable", operand], dry_run=dry_run, timeout=30)
 
 
@@ -122,4 +126,8 @@ def remove(item: Item, *, dry_run: bool = False) -> ActionResult:
         return operand
     if item.kind == "theme":
         return _run(["theme", "remove", operand], dry_run=dry_run, timeout=180)
+    if not dry_run:
+        from omastore.local import restore_hidden_bar_widgets
+
+        restore_hidden_bar_widgets(item.id)
     return _run(["plugin", "remove", operand, "--yes"], dry_run=dry_run, timeout=180)

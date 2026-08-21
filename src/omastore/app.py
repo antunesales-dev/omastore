@@ -188,9 +188,14 @@ def confirm_prompt(action: str, item: Item) -> str:
         lines.append(str(loc))
     if item.verification_label:
         lines.append(f"verification: {item.verification_label}")
-    if item.warnings:
+    extra_warnings: list[str] = list(item.warnings)
+    if action == "remove" and item.kind == "plugin":
+        from omastore.local import layout_remove_warnings
+
+        extra_warnings.extend(layout_remove_warnings(item.id))
+    if extra_warnings:
         lines.append("warnings:")
-        lines.extend(f"- {warning}" for warning in item.warnings)
+        lines.extend(f"- {warning}" for warning in extra_warnings)
     if action in {"install", "enable"}:
         lines.append("Community plugins and themes run unsandboxed.")
     if action == "install":
@@ -199,47 +204,40 @@ def confirm_prompt(action: str, item: Item) -> str:
 
 
 def filter_bar(query: Query, tab: Tab = "themes") -> str:
+    status = {
+        "all": "all",
+        "installed": "installed",
+        "not-installed": "not-installed",
+        "uninstalled": "not-installed",
+        "available": "available",
+        "extra": "extra",
+        "stock": "stock",
+    }.get(query.status, query.status)
+    source = {
+        "all": "all",
+        "community": "community",
+        "builtin": "built-in",
+    }.get(query.source, query.source)
+    verified = {
+        "all": "all",
+        "yes": "verified",
+        "no": "unverified",
+        "unverified": "unverified",
+    }.get(query.verified, query.verified)
+    sort = f"{query.min_stars}+stars" if query.min_stars else query.sort
+    parts = [f"f {status}", f"v {source}"]
     if tab == "plugins":
-        status = {
-            "all": "all",
-            "installed": "installed",
-            "not-installed": "not installed",
-            "uninstalled": "not installed",
-            "available": "not installed",
-        }.get(query.status, query.status)
-        source = {
-            "all": "all sources",
-            "community": "community",
-            "builtin": "built-in",
-        }.get(query.source, query.source)
-        verified = {
-            "all": "all verification",
-            "yes": "verified",
-            "no": "unverified",
-            "unverified": "unverified",
-        }.get(query.verified, query.verified)
-        rating = f"{query.min_stars}+ stars" if query.min_stars else query.sort
-        return (
-            f"{status} · {source} · {verified} · {rating}"
-            "     f  v  y  s  0 reset"
-        )
-    bits: list[str] = []
-    if query.status != "all":
-        bits.append(query.status)
-    if query.source != "all":
-        bits.append(query.source)
-    if query.hue != "all":
-        bits.append(query.hue)
-    if query.category != "all":
-        bits.append(query.category)
-    if query.tag != "all":
-        bits.append(query.tag)
-    if query.verified != "all":
-        bits.append(f"verified:{query.verified}")
-    if query.min_stars:
-        bits.append(f"{query.min_stars}+ stars")
-    bits.append(query.sort)
-    return f"{' · '.join(bits)}     f  v  s  0 reset"
+        parts.append(f"y {verified}")
+    parts.append(f"s sort:{sort}")
+    extras: list[str] = []
+    if query.hue not in {"", "all"}:
+        extras.append(f"hue:{query.hue}")
+    if query.category not in {"", "all"}:
+        extras.append(f"cat:{query.category}")
+    if query.tag not in {"", "all"}:
+        extras.append(f"tag:{query.tag}")
+    extras.append("0 reset")
+    return "   ".join(parts + extras)
 
 
 def format_status(
@@ -675,7 +673,7 @@ class OmaStoreApp(App[None]):
         query = self.filters
         if query.status != "all" or query.source != "all" or query.verified != "all":
             return True
-        if query.sort != "stars" or query.min_stars or query.hue != "all":
+        if query.min_stars or query.hue != "all":
             return True
         if query.category != "all" or query.tag != "all":
             return True
@@ -687,7 +685,7 @@ class OmaStoreApp(App[None]):
         if not self._filters_dirty():
             return
         self.search = strip_filter_tokens(self.search)
-        self.filters = reset_filters(Query(text=self.search))
+        self.filters = reset_filters(Query(text=self.search, sort=self.filters.sort))
         box = self.query_one("#search", Input)
         if box.value != self.search:
             with self.prevent(Input.Changed):

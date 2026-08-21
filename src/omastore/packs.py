@@ -221,6 +221,11 @@ def describe_pack_action(action: str, pack: Pack, rows: list[Item]) -> str:
             lines.append(f"verification: {item.verification_label}")
         for warning in item.warnings:
             lines.append(f"- {warning}")
+        if action == "remove" and item.kind == "plugin":
+            from omastore.local import layout_remove_warnings
+
+            for warning in layout_remove_warnings(item.id):
+                lines.append(f"- {warning}")
     lines.append("")
     if action == "install":
         lines.append("Community plugins and themes run unsandboxed.")

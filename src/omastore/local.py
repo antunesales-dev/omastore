@@ -22,6 +22,226 @@ def user_plugins_dir() -> Path:
     return _home() / ".config" / "omarchy" / "plugins"
 
 
+def shell_json_path() -> Path:
+    root = os.environ.get("XDG_CONFIG_HOME")
+    if root:
+        return Path(root) / "omarchy" / "shell.json"
+    return _home() / ".config" / "omarchy" / "shell.json"
+
+
+def _layout_entry_id(entry: object) -> str:
+    if isinstance(entry, str):
+        return entry.strip()
+    if isinstance(entry, dict):
+        return str(entry.get("id") or "").strip()
+    return ""
+
+
+def _hidden_ids(entry: object) -> list[str]:
+    if not isinstance(entry, dict):
+        return []
+    hidden = entry.get("hiddenEntries")
+    if not isinstance(hidden, list):
+        return []
+    ids: list[str] = []
+    seen: set[str] = set()
+    for row in hidden:
+        ident = _layout_entry_id(row)
+        if not ident or ident in seen:
+            continue
+        seen.add(ident)
+        ids.append(ident)
+    return ids
+
+
+def hidden_bar_widgets(plugin_id: str, *, path: Path | None = None) -> list[str]:
+    """Read-only: widget ids stashed in this plugin's hiddenEntries. Never writes."""
+    ident = (plugin_id or "").strip()
+    if not ident:
+        return []
+    target = path or shell_json_path()
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return []
+    if not isinstance(raw, dict):
+        return []
+    found: list[str] = []
+    seen: set[str] = set()
+    layout = raw.get("bar")
+    sections = layout.get("layout") if isinstance(layout, dict) else None
+    if isinstance(sections, dict):
+        for rows in sections.values():
+            if not isinstance(rows, list):
+                continue
+            for entry in rows:
+                if _layout_entry_id(entry) != ident:
+                    continue
+                for hid in _hidden_ids(entry):
+                    if hid in seen:
+                        continue
+                    seen.add(hid)
+                    found.append(hid)
+    plugins = raw.get("plugins")
+    if isinstance(plugins, list):
+        for entry in plugins:
+            if _layout_entry_id(entry) != ident:
+                continue
+            for hid in _hidden_ids(entry):
+                if hid in seen:
+                    continue
+                seen.add(hid)
+                found.append(hid)
+    return found
+
+
+HIDDEN_WIDGET_WARN = (
+    "These widgets are hidden inside this plugin. "
+    "They will be put back on the bar first"
+)
+_HIDDEN_LIST_CAP = 12
+
+
+def layout_remove_warnings(plugin_id: str, *, path: Path | None = None) -> list[str]:
+    hidden = hidden_bar_widgets(plugin_id, path=path)
+    if not hidden:
+        return []
+    shown = hidden[:_HIDDEN_LIST_CAP]
+    listing = ", ".join(shown)
+    extra = len(hidden) - len(shown)
+    if extra:
+        listing += f", and {extra} more"
+    return [f"{HIDDEN_WIDGET_WARN}: {listing}"]
+
+
+def _as_layout_entry(row: object) -> dict | None:
+    ident = _layout_entry_id(row)
+    if not ident:
+        return None
+    if isinstance(row, dict):
+        return dict(row)
+    return {"id": ident}
+
+
+def _ids_in_layout(sections: dict) -> set[str]:
+    ids: set[str] = set()
+    for rows in sections.values():
+        if not isinstance(rows, list):
+            continue
+        for entry in rows:
+            ident = _layout_entry_id(entry)
+            if ident:
+                ids.add(ident)
+    return ids
+
+
+def _write_shell_json(path: Path, data: dict) -> bool:
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+
+def _take_hidden_rows(entry: dict, plugin_id: str, present: set[str]) -> list[dict]:
+    hidden = entry.get("hiddenEntries")
+    if not isinstance(hidden, list) or not hidden:
+        return []
+    rows: list[dict] = []
+    for row in hidden:
+        obj = _as_layout_entry(row)
+        if obj is None:
+            continue
+        hid = _layout_entry_id(obj)
+        if hid == plugin_id or hid in present:
+            continue
+        present.add(hid)
+        rows.append(obj)
+    return rows
+
+
+def restore_hidden_bar_widgets(plugin_id: str, *, path: Path | None = None) -> list[str]:
+    """Move hiddenEntries back onto the bar section, then clear them. Returns restored ids."""
+    ident = (plugin_id or "").strip()
+    if not ident:
+        return []
+    target = path or shell_json_path()
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return []
+    if not isinstance(raw, dict):
+        return []
+    bar = raw.get("bar")
+    if not isinstance(bar, dict):
+        return []
+    sections = bar.get("layout")
+    if not isinstance(sections, dict):
+        return []
+    present = _ids_in_layout(sections)
+    restored: list[str] = []
+    changed = False
+    for section_name, rows in list(sections.items()):
+        if not isinstance(rows, list):
+            continue
+        new_rows: list[object] = []
+        section_changed = False
+        for entry in rows:
+            if _layout_entry_id(entry) != ident or not isinstance(entry, dict):
+                new_rows.append(entry)
+                continue
+            taken = _take_hidden_rows(entry, ident, present)
+            entry = dict(entry)
+            if "hiddenEntries" in entry:
+                entry.pop("hiddenEntries", None)
+                section_changed = True
+            new_rows.append(entry)
+            if taken:
+                new_rows.extend(taken)
+                restored.extend(_layout_entry_id(row) for row in taken)
+                section_changed = True
+        if section_changed:
+            sections[section_name] = new_rows
+            changed = True
+    plugins = raw.get("plugins")
+    if isinstance(plugins, list):
+        right = sections.get("right")
+        if not isinstance(right, list):
+            right = []
+        plugin_changed = False
+        new_plugins: list[object] = []
+        extra_right: list[dict] = []
+        for entry in plugins:
+            if _layout_entry_id(entry) != ident or not isinstance(entry, dict):
+                new_plugins.append(entry)
+                continue
+            taken = _take_hidden_rows(entry, ident, present)
+            entry = dict(entry)
+            if "hiddenEntries" in entry:
+                entry.pop("hiddenEntries", None)
+                plugin_changed = True
+            new_plugins.append(entry)
+            extra_right.extend(taken)
+            restored.extend(_layout_entry_id(row) for row in taken)
+        if plugin_changed or extra_right:
+            raw["plugins"] = new_plugins
+            sections["right"] = [*right, *extra_right]
+            changed = True
+    if not changed:
+        return []
+    if not _write_shell_json(target, raw):
+        return []
+    return restored
+
+
 def stock_themes_dir() -> Path:
     omarchy = os.environ.get("OMARCHY_PATH", "/usr/share/omarchy")
     return Path(omarchy) / "themes"

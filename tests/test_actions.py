@@ -1,6 +1,6 @@
 import subprocess
 
-from omastore.actions import ActionResult, apply_theme, enable_plugin, install, install_pack, remove_pack
+from omastore.actions import ActionResult, apply_theme, disable_plugin, enable_plugin, install, install_pack, remove, remove_pack
 from omastore.models import Item
 
 
@@ -136,3 +136,34 @@ def test_apply_plugin_fails(monkeypatch) -> None:
     result = apply_theme(_plugin())
     assert result.ok is False
     assert result.message == "apply is for themes"
+
+
+class _Ok:
+    returncode = 0
+    stdout = "ok"
+    stderr = ""
+
+
+def test_remove_plugin_restores_hidden_first(monkeypatch) -> None:
+    called: list[str] = []
+    monkeypatch.setattr("omastore.local.restore_hidden_bar_widgets", lambda pid: called.append(pid) or [])
+    monkeypatch.setattr("omastore.actions.run_omarchy", lambda *a, **k: _Ok())
+    result = remove(_plugin(id="groups.plugin", installed=True))
+    assert result.ok is True
+    assert called == ["groups.plugin"]
+
+
+def test_disable_plugin_restores_hidden_first(monkeypatch) -> None:
+    called: list[str] = []
+    monkeypatch.setattr("omastore.local.restore_hidden_bar_widgets", lambda pid: called.append(pid) or [])
+    monkeypatch.setattr("omastore.actions.run_omarchy", lambda *a, **k: _Ok())
+    result = disable_plugin(_plugin(id="groups.plugin", installed=True, enabled=True))
+    assert result.ok is True
+    assert called == ["groups.plugin"]
+
+
+def test_remove_dry_run_does_not_restore(monkeypatch) -> None:
+    called: list[str] = []
+    monkeypatch.setattr("omastore.local.restore_hidden_bar_widgets", lambda pid: called.append(pid))
+    remove(_plugin(id="groups.plugin", installed=True), dry_run=True)
+    assert called == []
