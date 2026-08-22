@@ -165,12 +165,29 @@ Footer {
 }
 
 #credits {
-    width: 78;
-    height: auto;
-    max-height: 90%;
+    width: 1fr;
+    height: 1fr;
+    margin: 1 2;
+    max-width: 100%;
+    max-height: 100%;
     padding: 1 2;
     background: #1a1a1a;
     border: tall #7dcea0;
+}
+
+#credits-bar {
+    height: 1;
+    color: #7dcea0;
+    text-style: bold;
+}
+
+#credits-tabs {
+    height: 1;
+    padding: 0 0 1 0;
+}
+
+#credits-scroll {
+    height: 1fr;
 }
 
 .badge {

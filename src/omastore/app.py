@@ -15,6 +15,7 @@ from rich.text import Text
 from omastore.actions import (
     ActionResult,
     apply_theme,
+    describe_outdated_update,
     disable_plugin,
     enable_plugin,
     install,
@@ -22,10 +23,13 @@ from omastore.actions import (
     remove,
     remove_pack,
     update,
+    update_outdated,
 )
+from omastore import __version__
 from omastore.catalog import fetch_readme, load_store
-from omastore.credits import ABOUT
+from omastore.credits import ABOUT, changelog_text
 from omastore.filters import (
+    INSTALLED_SECTION_LABELS,
     Query,
     apply_query,
     clamp_query,
@@ -33,6 +37,7 @@ from omastore.filters import (
     cycle_source,
     cycle_status,
     cycle_verified,
+    installed_section,
     parse_search,
     reset_filters,
     strip_filter_tokens,
@@ -105,7 +110,7 @@ def pack_prompt(pack: Pack, items: list[Item], width: int = 40) -> Text:
     return text
 
 
-def list_prompt(item: Item, width: int = 40) -> Text:
+def list_prompt(item: Item, width: int = 40, tab: Tab = "themes") -> Text:
     text = Text()
     if item.current or (item.kind == "plugin" and item.enabled):
         mark, style = "●", "green"
@@ -115,7 +120,7 @@ def list_prompt(item: Item, width: int = 40) -> Text:
         mark, style = "○", "dim"
     text.append(f"{mark} ", style=style)
     used = 2
-    if item.kind == "plugin":
+    if item.kind == "plugin" and tab != "installed":
         badge = item.verification_label
         if badge == "verified":
             text.append("✓ ", style="green")
@@ -127,7 +132,10 @@ def list_prompt(item: Item, width: int = 40) -> Text:
     if getattr(item, "outdated", False):
         text.append("↑ ", style="yellow")
         used += 2
-    star = f"*{item.stars}" if item.stars is not None and item.stars > 0 else ""
+    if tab == "installed":
+        star = ""
+    else:
+        star = f"*{item.stars}" if item.stars is not None and item.stars > 0 else ""
     star_width = 6 if star else 0
     name_width = max(8, width - used - (star_width + 1 if star else 0))
     text.append(set_cell_size(item.name, name_width))
@@ -137,25 +145,57 @@ def list_prompt(item: Item, width: int = 40) -> Text:
     return text
 
 
-def action_groups(item: Item) -> tuple[list[str], list[str]]:
+def bulk_update_targets(shown: list[Item], tab: Tab, query: Query) -> list[Item]:
+    """Listed outdated extras when `f outdated` is on Installed or Plugins."""
+    if tab not in {"installed", "plugins"}:
+        return []
+    if query.status not in {"outdated", "update", "upgrade"}:
+        return []
+    return [item for item in shown if getattr(item, "outdated", False) and item.can_update]
+
+
+def item_key_from_href(href: str) -> str:
+    """Turn a pack markdown link into theme:id / plugin:id, or empty."""
+    raw = (href or "").strip()
+    if raw.startswith("omastore://"):
+        raw = raw.removeprefix("omastore://")
+    elif raw.startswith("omastore:"):
+        raw = raw.removeprefix("omastore:")
+    if raw.startswith("plugin/") or raw.startswith("theme/"):
+        kind, _, rest = raw.partition("/")
+        raw = f"{kind}:{rest}"
+    if raw.startswith("plugin:") or raw.startswith("theme:"):
+        return raw
+    return ""
+
+
+def action_groups(item: Item, *, trying: bool = False, bulk_outdated: bool = False) -> tuple[list[str], list[str]]:
     do: list[str] = []
     if item.can_install:
         do.append("[i] install")
     if item.kind == "theme":
-        if item.installed:
-            do.append("[t] try")
-        do.append("[b] back")
-    if item.can_apply:
-        do.append("[a] apply")
+        if item.current:
+            if trying:
+                do.append("[b] back")
+        else:
+            if item.installed:
+                do.append("[t] try")
+            do.append("[b] back")
+            if item.can_apply:
+                do.append("[a] apply")
     if item.can_enable:
         do.append("[e] enable")
     if item.can_disable:
         do.append("[d] disable")
-    if item.can_update:
+    if bulk_outdated:
+        do.append("[u] update listed")
+    elif item.can_update:
         do.append("[u] update")
     if item.can_remove:
         do.append("[x] remove")
     look = ["[o] repo", "[c] catalog", "[p] zoom"]
+    if item.author or (item.repo and "github.com/" in item.repo):
+        look.append("[g] by author")
     return do, look
 
 
@@ -196,6 +236,10 @@ def confirm_prompt(action: str, item: Item) -> str:
         lines.append(str(loc))
     if item.verification_label:
         lines.append(f"verification: {item.verification_label}")
+    if action == "update" and (item.installed_rev or item.latest_rev):
+        left = (item.installed_rev or "?")[:8]
+        right = (item.latest_rev or "?")[:8]
+        lines.append(f"{left} → {right}")
     extra_warnings: list[str] = list(item.warnings)
     if action == "remove" and item.kind == "plugin":
         from omastore.local import layout_remove_warnings
@@ -220,6 +264,11 @@ def filter_bar(query: Query, tab: Tab = "themes") -> str:
         "available": "available",
         "extra": "extra",
         "stock": "stock",
+        "outdated": "outdated",
+        "update": "outdated",
+        "upgrade": "outdated",
+        "updatable": "updatable",
+        "updates": "updatable",
     }.get(query.status, query.status)
     source = {
         "all": "all",
@@ -244,6 +293,10 @@ def filter_bar(query: Query, tab: Tab = "themes") -> str:
         extras.append(f"cat:{query.category}")
     if query.tag not in {"", "all"}:
         extras.append(f"tag:{query.tag}")
+    if query.author:
+        extras.append(f"by:{query.author}")
+    if query.pack:
+        extras.append(f"pack:{query.pack}")
     extras.append("0 reset")
     return "   ".join(parts + extras)
 
@@ -256,6 +309,7 @@ def format_status(
     trying: str = "",
     previous: str = "",
     outdated: int = 0,
+    cache_age: str = "",
 ) -> str:
     parts = [status_text, f"{shown} {label}"]
     if trying:
@@ -265,6 +319,8 @@ def format_status(
         parts.append(extra)
     if outdated:
         parts.append(f"{outdated} outdated")
+    if cache_age:
+        parts.append(cache_age)
     return "  ·  ".join(part for part in parts if part)
 
 
@@ -318,6 +374,26 @@ def item_markdown(
         bits.append(f"`{item.install_url}`")
     if item.verification:
         bits.append(f"Verification: `{item.verification}`")
+        bits.append("HANCORE verified is a signal; we still scan.")
+    if item.kind == "plugin" and not item.first_party and not item.builtin:
+        bits.append("Plugins run in omarchy-shell. There is no try; disable or remove to undo.")
+    from omastore.scan import cached_scan_summary
+
+    bits.append(cached_scan_summary(item))
+    if item.kind == "plugin":
+        from omastore.local import hidden_bar_widgets
+
+        hidden = hidden_bar_widgets(item.id)
+        if hidden:
+            bits.append("Hiding on the bar: " + ", ".join(hidden[:8]))
+    if item.outdated:
+        bits.append("")
+        bits.append("**Update available**")
+        if item.installed_rev or item.latest_rev:
+            left = (item.installed_rev or "?")[:8]
+            right = (item.latest_rev or "?")[:8]
+            bits.append(f"`{left}` → `{right}`")
+        bits.append("`[u]` updates with the official omarchy command.")
     if item.install_note:
         bits.append("")
         bits.append(item.install_note)
@@ -646,15 +722,63 @@ class ShotScreen(ModalScreen[None]):
 
 
 class CreditsScreen(ModalScreen[None]):
+    DEFAULT_CSS = """
+    CreditsScreen {
+        align: center middle;
+    }
+    """
     BINDINGS = [
         Binding("escape,q,enter,question_mark", "close", "Close", show=False),
+        Binding("c,1", "show_credits", "Credits", show=False),
+        Binding("l,2", "show_log", "Changelog", show=False),
     ]
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.pane = "credits"
+
     def compose(self) -> ComposeResult:
-        yield Markdown(ABOUT, id="credits")
+        yield Vertical(
+            Static(self._bar(), id="credits-bar", markup=False),
+            Horizontal(
+                Static("credits", id="credits-tab-credits", classes="tab active"),
+                Static("changelog", id="credits-tab-log", classes="tab"),
+                id="credits-tabs",
+            ),
+            VerticalScroll(Markdown(ABOUT, id="credits-body"), id="credits-scroll"),
+            id="credits",
+        )
+
+    def _bar(self) -> str:
+        return f"omastore {__version__}   [c] credits   [l] changelog   [esc] close"
+
+    def _paint_tabs(self) -> None:
+        for name, widget_id in (("credits", "credits-tab-credits"), ("log", "credits-tab-log")):
+            tab = self.query_one(f"#{widget_id}", Static)
+            tab.set_class(self.pane == name, "active")
+
+    def _show(self, pane: str, body: str) -> None:
+        self.pane = pane
+        self._paint_tabs()
+        self.query_one("#credits-body", Markdown).update(body)
+        self.query_one("#credits-scroll", VerticalScroll).scroll_home(animate=False)
+
+    def action_show_credits(self) -> None:
+        self._show("credits", ABOUT)
+
+    def action_show_log(self) -> None:
+        self._show("log", changelog_text())
 
     def action_close(self) -> None:
         self.dismiss()
+
+    @on(Click, "#credits-tab-credits")
+    def _click_credits(self) -> None:
+        self.action_show_credits()
+
+    @on(Click, "#credits-tab-log")
+    def _click_log(self) -> None:
+        self.action_show_log()
 
 
 class OmaStoreApp(App[None]):
@@ -673,6 +797,7 @@ class OmaStoreApp(App[None]):
         Binding("t", "try_theme", "Try", show=False),
         Binding("b", "revert_theme", "Back", show=False),
         Binding("o", "open_repo", "Repo", show=False),
+        Binding("g", "more_by_author", "By author", show=False),
         Binding("c", "open_catalog", "Catalog", show=False),
         Binding("p", "open_preview", "Preview", show=False),
         Binding("a", "do_apply", "Apply", show=False),
@@ -681,11 +806,11 @@ class OmaStoreApp(App[None]):
         Binding("u", "do_update", "Update", show=False),
         Binding("x", "do_remove", "Remove", show=False),
         Binding("r", "refresh", "Refresh", show=False),
-        Binding("f", "cycle_status", "Filter", show=True),
+        Binding("f", "cycle_status", "Filter", show=False),
         Binding("v", "cycle_source", "Source", show=False),
         Binding("y", "cycle_verified", "Verified", show=False),
         Binding("s", "cycle_sort", "Sort", show=False),
-        Binding("question_mark", "credits", "Credits", show=True),
+        Binding("question_mark", "credits", "credits / changelog", show=True, key_display="[?]"),
         Binding("q", "quit", "Quit", show=True),
     ]
 
@@ -709,11 +834,15 @@ class OmaStoreApp(App[None]):
         self._pending_about_key = ""
         self._try_session: dict | None = None
         self._shots: dict[str, str] = {}
+        self.catalogs = None
+        self._omarchy_css = ""
+        self._local_snap: tuple | None = None
+        self._local_timer = None
 
     def compose(self) -> ComposeResult:
         yield Vertical(
             Horizontal(
-                Static("Omastore", id="brand"),
+                Static(f"Omastore {__version__}", id="brand"),
                 Static("1 themes", id="tab-themes", classes="tab active"),
                 Static("2 plugins", id="tab-plugins", classes="tab"),
                 Static("3 installed", id="tab-installed", classes="tab"),
@@ -743,14 +872,14 @@ class OmaStoreApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.stylesheet.add_source(omarchy_theme_css())
-        self.refresh_css()
+        self._apply_omarchy_css()
         self.tab = self.start_tab
         self._paint_tabs()
         if self.search:
             self.query_one("#search", Input).value = self.search
         self.query_one("#list", OptionList).focus()
         self.load_items()
+        self._local_timer = self.set_interval(2.0, self._poll_local)
         self._maybe_notice()
 
     def _maybe_notice(self) -> None:
@@ -789,6 +918,8 @@ class OmaStoreApp(App[None]):
         if query.min_stars or query.hue != "all":
             return True
         if query.category != "all" or query.tag != "all":
+            return True
+        if query.author or query.pack:
             return True
         return self.search != strip_filter_tokens(self.search)
 
@@ -884,7 +1015,9 @@ class OmaStoreApp(App[None]):
     def _run_try(self, item: Item) -> None:
         from omastore.preview import remember_and_apply
 
-        result = remember_and_apply(item.name)
+        from omastore.local import omarchy_theme_name
+
+        result = remember_and_apply(omarchy_theme_name(item) or item.name)
         self.call_from_thread(self._preview_done, "try", result)
 
     @work(thread=True, exclusive=False, group="theme-preview")
@@ -908,6 +1041,74 @@ class OmaStoreApp(App[None]):
         else:
             self.notify(message, severity="error")
         self.load_items()
+
+    def action_more_by_author(self) -> None:
+        if self._search_focused():
+            return
+        if self.tab == "packs":
+            self._show_pack_plugins()
+            return
+        item = self.selected
+        if item is None:
+            return
+        from omastore.filters import _fold_author
+
+        token = _fold_author(item.author or "")
+        if not token and item.repo and "github.com/" in item.repo:
+            token = item.repo.split("github.com/", 1)[1].split("/")[0]
+        token = (token or "").strip()
+        if not token:
+            self.notify("no author on this listing")
+            return
+        self.search = f"by:{token}"
+        self.filters = parse_search(self.search, defaults=Query(sort=self.filters.sort))
+        box = self.query_one("#search", Input)
+        with self.prevent(Input.Changed):
+            box.value = self.search
+        self._rebuild_list()
+        self.notify(f"listings by {item.author or token}  ·  1 / 2 for the other kind")
+
+    def _show_pack_plugins(self) -> None:
+        pack = self.selected_pack
+        if pack is None:
+            return
+        members = pack.listed(self.items)
+        if not members:
+            self.notify("no verified plugins matched")
+            return
+        self.search = f"pack:{pack.id}"
+        self.filters = parse_search(self.search, defaults=Query(sort=self.filters.sort))
+        box = self.query_one("#search", Input)
+        with self.prevent(Input.Changed):
+            box.value = self.search
+        self.tab = "plugins"
+        self._paint_tabs()
+        self._rebuild_list()
+        self.notify(f"{len(members)} plugins from {pack.title}")
+
+    def _jump_to_item(self, key: str) -> None:
+        item = next((row for row in self.items if row.key == key), None)
+        if item is None:
+            self.notify(f"not in catalog: {key}")
+            return
+        self.search = strip_filter_tokens(self.search)
+        self.filters = reset_filters(Query(text=self.search, sort=self.filters.sort))
+        box = self.query_one("#search", Input)
+        if box.value != self.search:
+            with self.prevent(Input.Changed):
+                box.value = self.search
+        self.tab = "plugins" if item.kind == "plugin" else "themes"
+        self.selected = item
+        self._paint_tabs()
+        self._rebuild_list()
+
+    @on(Markdown.LinkClicked, "#readme")
+    def on_readme_link(self, event: Markdown.LinkClicked) -> None:
+        key = item_key_from_href(str(getattr(event, "href", "") or ""))
+        if not key:
+            return
+        event.stop()
+        self._jump_to_item(key)
 
     def action_open_repo(self) -> None:
         self._open_link("repo")
@@ -964,6 +1165,10 @@ class OmaStoreApp(App[None]):
         self._act("disable")
 
     def action_do_update(self) -> None:
+        rows = bulk_update_targets(self.shown, self.tab, self._active_query())
+        if rows:
+            self._scan_then_update_outdated(rows)
+            return
         self._act("update")
 
     def action_do_remove(self) -> None:
@@ -1024,15 +1229,54 @@ class OmaStoreApp(App[None]):
         elif item.can_enable:
             self._act("enable")
 
+    def _apply_omarchy_css(self) -> None:
+        css = omarchy_theme_css()
+        if css == self._omarchy_css:
+            return
+        self._omarchy_css = css
+        self._css_gen = getattr(self, "_css_gen", 0) + 1
+        self.stylesheet.add_source(css, read_from="omarchy-live.tcss", tie_breaker=self._css_gen)
+        self.refresh_css()
+
+    def _poll_local(self) -> None:
+        from omastore.local import local_fingerprint
+
+        snap = local_fingerprint()
+        if snap == self._local_snap:
+            return
+        self._sync_local()
+
+    @work(thread=True, exclusive=True, group="local-sync")
+    def _sync_local(self) -> None:
+        from omastore.local import load_local, overlay
+        from omastore.updates import mark_outdated
+
+        local = load_local()
+        base = [item for item in self.items if not item.local_only]
+        if not base:
+            return
+        items = overlay(base, local)
+        items = mark_outdated(items, local)
+        self.call_from_thread(self._set_items, items, "")
+
     @work(thread=True, exclusive=True)
     def load_items(self, force: bool = False) -> None:
         catalogs, items, local = load_store(force=force)
         errors = [err for err in (catalogs.theme_error, catalogs.plugin_error, getattr(local, "error", "")) if err]
         suffix = f"  ·  {errors[0]}" if errors else ""
-        self.call_from_thread(self._set_items, items, suffix)
+        self.call_from_thread(self._set_items, items, suffix, catalogs)
 
-    def _set_items(self, items: list[Item], extra_status: str = "") -> None:
+    def _set_items(self, items: list[Item], extra_status: str = "", catalogs=None) -> None:
         self.items = items
+        if catalogs is not None:
+            self.catalogs = catalogs
+        try:
+            from omastore.local import local_fingerprint
+
+            self._local_snap = local_fingerprint()
+        except OSError:
+            pass
+        self._apply_omarchy_css()
         themes = sum(1 for item in items if item.kind == "theme")
         plugins = sum(1 for item in items if item.kind == "plugin")
         installed = sum(1 for item in items if item.installed)
@@ -1056,21 +1300,42 @@ class OmaStoreApp(App[None]):
             return
         self.selected_pack = None
         previous = self.selected.key if self.selected else ""
-        self.shown = apply_query(self.items, self._active_query(), self.tab)
+        shown = apply_query(self.items, self._active_query(), self.tab)
+        unique: list[Item] = []
+        seen_keys: set[str] = set()
+        for item in shown:
+            if item.key in seen_keys:
+                continue
+            seen_keys.add(item.key)
+            unique.append(item)
+        self.shown = unique
         listing = self.query_one("#list", OptionList)
         row_width = listing.size.width or 40
         if row_width > 4:
             row_width -= 3
-        options = [
-            Option(list_prompt(item, row_width), id=item.key.replace(":", "__"))
-            for item in self.shown
-        ]
+        options: list[Option] = []
+        option_at: list[int] = []
+        last_section: int | None = None
+        for item in self.shown:
+            if self.tab == "installed":
+                section = installed_section(item)
+                if section != last_section:
+                    label = INSTALLED_SECTION_LABELS[section]
+                    options.append(Option(Text(label, style="dim"), id=f"hdr__{section}", disabled=True))
+                    last_section = section
+            option_at.append(len(options))
+            options.append(Option(list_prompt(item, row_width, tab=self.tab), id=item.key.replace(":", "__")))
         listing.clear_options()
         if options:
             listing.add_options(options)
             index = next((i for i, item in enumerate(self.shown) if item.key == previous), 0)
-            listing.highlighted = index
-            self._select_key(self.shown[index].key.replace(":", "__"), immediate=False)
+            listing.highlighted = option_at[index]
+            same = bool(previous) and self.shown[index].key == previous
+            if same:
+                self.selected = self.shown[index]
+                self._render_detail(self.selected, settled=True)
+            else:
+                self._select_key(self.shown[index].key.replace(":", "__"), immediate=False)
         else:
             self.selected = None
             self._cancel_about()
@@ -1095,6 +1360,13 @@ class OmaStoreApp(App[None]):
             outdated = len(outdated_items(self.items))
         except Exception:
             pass
+        cache_age = ""
+        try:
+            from omastore.catalog import catalog_cache_age_label
+
+            cache_age = catalog_cache_age_label()
+        except OSError:
+            pass
         self.query_one("#status", Static).update(
             format_status(
                 self.status_text,
@@ -1102,6 +1374,7 @@ class OmaStoreApp(App[None]):
                 trying=trying,
                 previous=previous_theme,
                 outdated=outdated,
+                cache_age=cache_age,
             )
         )
 
@@ -1142,6 +1415,8 @@ class OmaStoreApp(App[None]):
         self._render_pack_detail(pack)
 
     def _select_key(self, key: str, *, immediate: bool = False) -> None:
+        if not key or key.startswith("hdr__"):
+            return
         if key.startswith("pack__") or self.tab == "packs":
             pack = get_pack(key.removeprefix("pack__"))
             self._select_pack(pack)
@@ -1181,8 +1456,35 @@ class OmaStoreApp(App[None]):
         cached = item.key in self._shots
         if item.readme and cached:
             self._render_detail(item, settled=True)
+        else:
+            self._load_about(item.key, fetch_image=not cached)
+        self._maybe_pre_scan(item)
+
+    def _maybe_pre_scan(self, item: Item) -> None:
+        url = (item.install_url or item.repo or "").strip()
+        if not url:
             return
-        self._load_about(item.key, fetch_image=not cached)
+        from omastore.scan import scan_cache_fresh
+
+        if scan_cache_fresh(item):
+            return
+        self._pre_scan(item.key)
+
+    @work(thread=True, exclusive=True, group="pre-scan")
+    def _pre_scan(self, key: str) -> None:
+        item = next((row for row in self.items if row.key == key), None)
+        if item is None:
+            return
+        from omastore.scan import scan_cache_fresh, scan_item
+
+        if scan_cache_fresh(item):
+            return
+        scan_item(item)
+        self.call_from_thread(self._pre_scan_done, key)
+
+    def _pre_scan_done(self, key: str) -> None:
+        if self.selected and self.selected.key == key:
+            self._render_detail(self.selected, settled=True)
 
     def _set_shot(self, path: str = "") -> None:
         shot = self.query_one("#shot")
@@ -1206,18 +1508,25 @@ class OmaStoreApp(App[None]):
         header = Text()
         header.append(item.name, style="bold")
         header.append("\n")
+        listed = ""
+        if item.kind == "theme" and item.local_name and item.local_name != item.name:
+            listed = f"listed as {item.local_name}"
         subtitle = "  ·  ".join(
             part
-            for part in (item.kind, item.author, item.status_label)
+            for part in (item.kind, item.author, item.status_label, listed)
             if part
         )
         header.append(subtitle or item.kind, style="dim")
+        if item.warnings:
+            header.append("\n")
+            header.append("warnings: " + "; ".join(item.warnings[:3]), style="yellow")
         pane_width = 48
         try:
             pane_width = max(32, int(self.query_one("#detail").size.width) - 6)
         except Exception:
             pass
-        do, look = action_groups(item)
+        bulk = bool(bulk_update_targets(self.shown, self.tab, self._active_query()))
+        do, look = action_groups(item, trying=bool(self._try_session), bulk_outdated=bulk)
         blocks = [format_action_hints(group, width=pane_width) for group in (do, look) if group]
         if blocks:
             header.append("\n")
@@ -1262,6 +1571,8 @@ class OmaStoreApp(App[None]):
             hints.append("[i] install remaining")
         if removable:
             hints.append("[x] remove installed")
+        if listed:
+            hints.append("[g] plugins")
         hints.append("[c] catalog")
         header.append("  ".join(hints), style="bold")
         meta.update(header)
@@ -1310,10 +1621,10 @@ class OmaStoreApp(App[None]):
         }
         if not allowed.get(name):
             return
-        if name == "install":
-            self._scan_then_install(item)
+        if name in {"install", "update"}:
+            self._scan_then_install(item, action=name)
             return
-        if name in {"remove", "update", "enable"}:
+        if name in {"remove", "enable"}:
 
             def confirmed(ok: bool | None, action=name, target=item) -> None:
                 if ok:
@@ -1323,28 +1634,28 @@ class OmaStoreApp(App[None]):
             return
         self._run_action(name, item)
 
-    def _scan_then_install(self, item: Item) -> None:
-        def scanned(results: list[ScanResult] | None, target=item) -> None:
+    def _scan_then_install(self, item: Item, *, action: str = "install") -> None:
+        def scanned(results: list[ScanResult] | None, target=item, act=action) -> None:
             if not results:
                 return
             result = results[0]
             if result.verdict == "clean":
-                def confirmed(ok: bool | None, scan=result, plugin=target) -> None:
+                def confirmed(ok: bool | None, scan=result, plugin=target, name=act) -> None:
                     if ok:
-                        self._run_action("install", plugin, scan_result=scan)
+                        self._run_action(name, plugin, scan_result=scan)
 
-                self.push_screen(ConfirmScreen(confirm_prompt("install", target)), confirmed)
+                self.push_screen(ConfirmScreen(confirm_prompt(act, target)), confirmed)
                 return
             allow = result.allows_install(True)
 
-            def decided(choice: str | None, scan=result, plugin=target, can_anyway=allow) -> None:
+            def decided(choice: str | None, scan=result, plugin=target, can_anyway=allow, name=act) -> None:
                 if choice != "anyway" or not can_anyway:
                     return
 
-                def sure(ok: bool | None, accepted=scan, plugin_item=plugin) -> None:
+                def sure(ok: bool | None, accepted=scan, plugin_item=plugin, action_name=name) -> None:
                     if ok:
                         self._run_action(
-                            "install",
+                            action_name,
                             plugin_item,
                             scan_result=accepted,
                             accept_scan_risks=True,
@@ -1355,6 +1666,61 @@ class OmaStoreApp(App[None]):
             self.push_screen(FindingsScreen(result, target, allow_anyway=allow), decided)
 
         self.push_screen(ScanScreen([item]), scanned)
+
+    def _scan_then_update_outdated(self, rows: list[Item]) -> None:
+        if not rows:
+            self.notify("nothing outdated")
+            return
+
+        def scanned(results: list[ScanResult] | None, members=rows) -> None:
+            if results is None:
+                return
+            scans = {row.item_key: row for row in results}
+            issue = first_issue(results)
+            if issue is None:
+                def confirmed(ok: bool | None, pending=members, by_key=scans) -> None:
+                    if ok:
+                        self._run_update_outdated(pending, scans=by_key)
+
+                self.push_screen(ConfirmScreen(describe_outdated_update(members)), confirmed)
+                return
+            plugin = next((row for row in members if row.key == issue.item_key), members[0])
+            dirty = sum(1 for row in results if row.verdict != "clean")
+            extra = f"update listed stopped at {plugin.name}"
+            if dirty > 1:
+                extra += f" ({dirty} listings had findings)"
+            allow = issue.allows_install(True) and all(
+                row.allows_install(True) for row in results if row.verdict != "clean"
+            )
+
+            def decided(
+                choice: str | None,
+                pending=members,
+                by_key=scans,
+                blocked=issue,
+                plugin_item=plugin,
+                note=extra,
+                can_anyway=allow,
+            ) -> None:
+                if choice != "anyway" or not can_anyway:
+                    return
+
+                def sure(ok: bool | None) -> None:
+                    if ok:
+                        self._run_update_outdated(
+                            pending,
+                            scans=by_key,
+                            accept_scan_risks=True,
+                        )
+
+                self.push_screen(ConfirmScreen(anyway_prompt(blocked, plugin_item, extra=note)), sure)
+
+            self.push_screen(
+                FindingsScreen(issue, plugin, extra=extra, allow_anyway=allow),
+                decided,
+            )
+
+        self.push_screen(ScanScreen(rows), scanned)
 
     def _act_pack(self, name: str = "install") -> None:
         pack = self.selected_pack
@@ -1470,15 +1836,38 @@ class OmaStoreApp(App[None]):
         self.load_items()
 
     @work(thread=True, exclusive=True, group="action")
+    def _run_update_outdated(
+        self,
+        rows: list[Item],
+        scans: dict[str, ScanResult] | None = None,
+        accept_scan_risks: bool = False,
+    ) -> None:
+        results = update_outdated(rows, scans=scans, accept_scan_risks=accept_scan_risks)
+        self.call_from_thread(self._update_outdated_done, results)
+
+    def _update_outdated_done(self, results: list[tuple[Item, ActionResult]]) -> None:
+        if not results:
+            self.notify("nothing outdated")
+            return
+        failed = next((item for item, result in results if not result.ok), None)
+        if failed is not None:
+            result = next(result for item, result in results if item is failed)
+            self.notify(f"update stopped at {failed.name}: {result.message}", severity="error")
+        else:
+            self.notify(f"updated {len(results)}")
+        self.load_items()
+
+    @work(thread=True, exclusive=True, group="action")
     def _run_action(self, name: str, item: Item, **kwargs) -> None:
         if name == "install":
             result = install(item, **kwargs)
+        elif name == "update":
+            result = update(item, **kwargs)
         else:
             runners = {
                 "apply": apply_theme,
                 "enable": enable_plugin,
                 "disable": disable_plugin,
-                "update": update,
                 "remove": remove,
             }
             result = runners[name](item)

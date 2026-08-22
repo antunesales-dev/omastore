@@ -55,6 +55,14 @@ def test_outdated_filter() -> None:
     ]
     shown = apply_query(items, Query(status="outdated"), "themes")
     assert [item.id for item in shown] == ["old"]
+    plugins = [
+        Item(kind="plugin", id="behind", name="Behind", installed=True, outdated=True, repo="https://github.com/a/b"),
+        Item(kind="plugin", id="fresh", name="Fresh", installed=True, outdated=False, repo="https://github.com/a/c"),
+    ]
+    assert [item.id for item in apply_query(plugins, Query(status="outdated"), "plugins")] == ["behind"]
+    assert [item.id for item in apply_query(plugins, Query(status="updatable"), "plugins")] == ["behind", "fresh"]
+    assert parse_search("is:upgrade").status == "upgrade"
+    assert matches_filters(plugins[0], Query(status="upgrade"))
 
 
 def test_cycle_status() -> None:
@@ -63,7 +71,14 @@ def test_cycle_status() -> None:
     query = cycle_status(Query())
     assert query.status == "installed"
     assert "current" not in STATUS_CYCLE
-    assert "outdated" not in STATUS_CYCLE
+    assert "outdated" in STATUS_CYCLE
+    walked = Query()
+    seen: list[str] = []
+    for _ in STATUS_CYCLE:
+        walked = cycle_status(walked)
+        seen.append(walked.status)
+    assert seen[-1] == "all"
+    assert "outdated" in seen
 
 
 def test_plugin_status_cycle_skips_theme_only_states() -> None:
@@ -72,9 +87,17 @@ def test_plugin_status_cycle_skips_theme_only_states() -> None:
     query = cycle_status(query, "plugins")
     assert query.status == "not-installed"
     query = cycle_status(query, "plugins")
+    assert query.status == "outdated"
+    query = cycle_status(query, "plugins")
     assert query.status == "all"
     extra = cycle_status(Query(status="extra"), "plugins")
     assert extra.status == "installed"
+    installed_tab = cycle_status(Query(), "installed")
+    assert installed_tab.status == "extra"
+    installed_tab = cycle_status(installed_tab, "installed")
+    assert installed_tab.status == "outdated"
+    installed_tab = cycle_status(installed_tab, "installed")
+    assert installed_tab.status == "all"
 
 
 def test_plugin_not_installed_and_verified_and_builtin() -> None:
@@ -102,6 +125,33 @@ def test_plugin_not_installed_and_verified_and_builtin() -> None:
     assert [item.id for item in community] == ["have", "open"]
 
 
+def test_pack_prefix_filters_verified_pins() -> None:
+    stocks = Item(
+        kind="plugin",
+        id="io.github.5d0tal1gat0r.stocks",
+        name="Stocks",
+        verification="verified",
+    )
+    other = Item(kind="plugin", id="raw", name="Raw", verification="verified")
+    query = parse_search("pack:finance")
+    assert query.pack == "finance"
+    shown = apply_query([stocks, other], query, "plugins")
+    assert [item.id for item in shown] == ["io.github.5d0tal1gat0r.stocks"]
+    missing = apply_query([stocks, other], parse_search("pack:missing"), "plugins")
+    assert missing == []
+
+
+def test_author_prefix_matches_name_or_github_owner() -> None:
+    lime = Item(kind="theme", id="a", name="A", author="limehawk", repo="https://github.com/limehawk/theme-a")
+    other = Item(kind="theme", id="b", name="B", author="someone", repo="https://github.com/other/theme-b")
+    owned = Item(kind="plugin", id="c", name="C", author="", repo="https://github.com/OldJobobo/omarchy-retro-82-theme")
+    query = parse_search("by:limehawk")
+    assert query.author == "limehawk"
+    assert apply_query([lime, other], query, "themes") == [lime]
+    by_repo = parse_search("author:oldjobobo")
+    assert apply_query([owned, other], by_repo, "plugins") == [owned]
+
+
 def test_stars_prefix_and_min_stars() -> None:
     query = parse_search("stars:10")
     assert query.min_stars == 10
@@ -123,6 +173,9 @@ def test_cycle_verified() -> None:
 def test_clamp_query_drops_theme_status_on_plugins() -> None:
     query = clamp_query(Query(status="current"), "plugins")
     assert query.status == "all"
+    assert clamp_query(Query(status="outdated"), "plugins").status == "outdated"
+    assert clamp_query(Query(status="outdated"), "installed").status == "outdated"
+    assert clamp_query(Query(status="extra"), "installed").status == "extra"
 
 
 def test_reset_filters_keeps_search_text() -> None:
@@ -177,6 +230,32 @@ def test_packs_tab_lists_no_items() -> None:
         _theme(id="void", name="Void"),
     ]
     assert apply_query(items, Query(), "packs") == []
+
+
+def test_installed_tab_hides_stock_and_groups() -> None:
+    items = [
+        Item(kind="theme", id="vantablack", name="Vantablack", installed=True, current=True, builtin=True),
+        Item(kind="theme", id="catppuccin", name="Catppuccin", installed=True, builtin=True, stars=27107),
+        Item(kind="theme", id="lumon", name="Lumon", installed=True, extra=True, stars=1),
+        Item(kind="plugin", id="demo", name="Demo", installed=True, enabled=True),
+        Item(kind="plugin", id="omarchy.clock", name="Clock", installed=True, first_party=True, builtin=True),
+    ]
+    shown = apply_query(items, Query(sort="stars"), "installed")
+    assert [item.id for item in shown] == ["vantablack", "lumon", "demo", "omarchy.clock"]
+    extra = apply_query(items, Query(status="extra"), "installed")
+    assert [item.id for item in extra] == ["lumon", "demo"]
+    stock = apply_query(items, Query(source="builtin"), "installed")
+    assert "catppuccin" in [item.id for item in stock]
+
+
+def test_outdated_sorts_first() -> None:
+    items = [
+        Item(kind="plugin", id="fresh", name="Fresh", installed=True, stars=50),
+        Item(kind="plugin", id="behind", name="Behind", installed=True, outdated=True, stars=1),
+        Item(kind="plugin", id="catalog", name="Catalog", stars=99),
+    ]
+    shown = apply_query(items, Query(sort="stars"), "plugins")
+    assert [item.id for item in shown] == ["behind", "catalog", "fresh"]
 
 
 def test_plugins_sort_stars_among_uninstalled() -> None:

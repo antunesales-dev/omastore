@@ -32,6 +32,7 @@ def test_mutate_allowed_default_off(monkeypatch) -> None:
     assert "search" in names
     assert "audit" in names
     assert "scan" in names
+    assert "outdated" in names
     assert "install" not in names
     assert "remove" not in names
 
@@ -40,6 +41,7 @@ def test_mutate_tools_listed_when_flag_on(monkeypatch) -> None:
     monkeypatch.setenv("OMASTORE_MCP_ALLOW_MUTATE", "1")
     names = {tool["name"] for tool in list_tools()}
     assert "install" in names
+    assert "pack_install" in names
     assert "remove" in names
 
 

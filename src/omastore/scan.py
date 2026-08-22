@@ -9,6 +9,7 @@ import re
 import subprocess
 import tarfile
 import tempfile
+import time
 import urllib.error
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -36,6 +37,7 @@ MAX_FINDINGS = 40
 MAX_FINDINGS_PER_FILE = 8
 CLONE_TIMEOUT = 60
 BASE64_MIN = 400
+SCAN_CACHE_TTL = 6 * 60 * 60
 
 SKIP_DIRS = {
     ".git",
@@ -140,27 +142,27 @@ HANCORE_ADVISORY_NEW = f"{PLUGIN_STORE_REPO}/security/advisories/new"
 LIMEHAWK_ISSUES_NEW = f"{THEME_STORE_REPO}/issues/new"
 
 _NETWORK_APIS = [
-    (re.compile(r"\bfetch\s*\("), "fetch(", "network"),
-    (re.compile(r"\bXMLHttpRequest\b"), "XMLHttpRequest", "network"),
-    (re.compile(r"\bQNetworkAccessManager\b"), "QNetworkAccessManager", "network"),
-    (re.compile(r"\bWebSocket\b"), "WebSocket", "network"),
-    (re.compile(r"\bwget\b"), "wget", "network"),
-    (re.compile(r"\bcurl\b"), "curl", "network"),
-    (re.compile(r"\burllib\.request\b"), "urllib.request", "network"),
-    (re.compile(r"\brequests\.(get|post|put|delete|request)\s*\("), "requests", "network"),
-    (re.compile(r"\bhttpx\."), "httpx", "network"),
-    (re.compile(r"\burlopen\s*\("), "urlopen", "network"),
+    (re.compile(r"\bfetch\s*\("), "fetch(", "network", "warn"),
+    (re.compile(r"\bXMLHttpRequest\b"), "XMLHttpRequest", "network", "warn"),
+    (re.compile(r"\bQNetworkAccessManager\b"), "QNetworkAccessManager", "network", "warn"),
+    (re.compile(r"\bWebSocket\b"), "WebSocket", "network", "warn"),
+    (re.compile(r"\bwget\b"), "wget", "network", "warn"),
+    (re.compile(r"\bcurl\b"), "curl", "network", "warn"),
+    (re.compile(r"\burllib\.request\b"), "urllib.request", "network", "warn"),
+    (re.compile(r"\brequests\.(get|post|put|delete|request)\s*\("), "requests", "network", "warn"),
+    (re.compile(r"\bhttpx\."), "httpx", "network", "warn"),
+    (re.compile(r"\burlopen\s*\("), "urlopen", "network", "warn"),
 ]
 
 _PROCESS_APIS = [
-    (re.compile(r"\bProcess\s*\{"), "QML Process", "process"),
-    (re.compile(r"\bQProcess\b"), "QProcess", "process"),
+    (re.compile(r"\bProcess\s*\{"), "QML Process", "process", "warn"),
+    (re.compile(r"\bQProcess\b"), "QProcess", "process", "warn"),
     (re.compile(r"\bsubprocess\b"), "subprocess", "process"),
     (re.compile(r"\bos\.system\s*\("), "os.system", "process"),
     (re.compile(r"\bos\.popen\s*\("), "os.popen", "process"),
     (re.compile(r"\bpopen\s*\("), "popen", "process"),
     (re.compile(r"\bexec\s*\("), "exec(", "process"),
-    (re.compile(r"\bhyprctl\b"), "hyprctl", "process"),
+    (re.compile(r"\bhyprctl\b"), "hyprctl", "process", "warn"),
     (re.compile(r"\bbash\s+-c\b"), "bash -c", "process"),
     (re.compile(r"/bin/sh\b"), "/bin/sh", "process"),
     (re.compile(r"/bin/bash\b"), "/bin/bash", "process"),
@@ -204,8 +206,8 @@ _DOC_EXEC = [
     (re.compile(r"curl[^\n]{0,80}\|\s*(bash|sh)\b"), "curl | bash", "process"),
     (re.compile(r"wget[^\n]{0,80}\|\s*(bash|sh)\b"), "wget | sh", "process"),
     (re.compile(r"\bbash\s+-c\b"), "bash -c", "process"),
-    (re.compile(r"\bhyprctl\b"), "hyprctl", "process"),
-    (re.compile(r"\bProcess\s*\{"), "QML Process", "process"),
+    (re.compile(r"\bhyprctl\b"), "hyprctl", "process", "warn"),
+    (re.compile(r"\bProcess\s*\{"), "QML Process", "process", "warn"),
 ]
 
 _HOST_RE = re.compile(r"https?://([A-Za-z0-9.-]+)")
@@ -608,11 +610,13 @@ def _scan_line(
     if per_file[0] >= MAX_FINDINGS_PER_FILE or len(findings) >= MAX_FINDINGS:
         return
     patterns = _NETWORK_APIS + _PROCESS_APIS + _SECRET_APIS + _OBFUSCATION if code else _DOC_EXEC
-    for regex, label, category in patterns:
+    for spec in patterns:
+        regex, label, category = spec[0], spec[1], spec[2]
+        severity: Severity = spec[3] if len(spec) > 3 else "block"  # type: ignore[misc]
         if regex.search(line):
             _add(
                 findings,
-                "block",
+                severity,
                 category,
                 rel,
                 lineno,
@@ -754,6 +758,68 @@ def scan_tree(item: Item, root: Path) -> ScanResult:
     return _result(item, findings, scanned_files=scanned, source=source)
 
 
+def _scan_cache_path(item: Item) -> Path:
+    from omastore.catalog import cache_dir
+    from omastore.models import slugify
+
+    ident = slugify(item.key or item.id or "item") or "item"
+    return cache_dir() / "scans" / f"{ident}.json"
+
+
+def save_scan_cache(item: Item, result: ScanResult) -> None:
+    path = _scan_cache_path(item)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = scan_payload(result)
+        payload["saved_at"] = time.time()
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError:
+        return
+
+
+def load_scan_cache(item: Item) -> dict | None:
+    path = _scan_cache_path(item)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def scan_cache_fresh(
+    item: Item,
+    *,
+    ttl: int = SCAN_CACHE_TTL,
+    now: float | None = None,
+) -> bool:
+    """True when a cache row exists, is within ttl, and still matches this repo."""
+    data = load_scan_cache(item)
+    if not data:
+        return False
+    try:
+        saved = float(data.get("saved_at") or 0)
+    except (TypeError, ValueError):
+        return False
+    stamp = time.time() if now is None else now
+    if saved <= 0 or stamp - saved >= ttl:
+        return False
+    repo = (item.repo or item.install_url or "").strip().rstrip("/")
+    cached = str(data.get("repo") or "").strip().rstrip("/")
+    if repo and cached and repo != cached:
+        return False
+    return True
+
+
+def cached_scan_summary(item: Item) -> str:
+    data = load_scan_cache(item)
+    if not data:
+        return "scan: not scanned"
+    verdict = str(data.get("verdict") or "unknown")
+    if not scan_cache_fresh(item):
+        return f"scan: stale ({verdict})"
+    return f"scan: {verdict}"
+
+
 def scan_item(item: Item, *, tree: Path | None = None) -> ScanResult:
     """Catalog checks, then fetch-without-running, then static audit. Fail closed."""
     findings = catalog_findings(item)
@@ -765,13 +831,17 @@ def scan_item(item: Item, *, tree: Path | None = None) -> ScanResult:
         findings.extend(extra)
         return _result(item, findings, scanned_files=scanned, source="tree")
     if blocked_url:
-        return _result(item, findings, source="catalog")
+        result = _result(item, findings, source="catalog")
+        save_scan_cache(item, result)
+        return result
     url = (item.install_url or item.repo or "").strip()
     try:
         with fetched_tree(url) as (root, source):
             extra, scanned = audit_tree(root)
             findings.extend(extra)
-            return _result(item, findings, scanned_files=scanned, source=source)
+            result = _result(item, findings, scanned_files=scanned, source=source)
+            save_scan_cache(item, result)
+            return result
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception as exc:
@@ -779,7 +849,9 @@ def scan_item(item: Item, *, tree: Path | None = None) -> ScanResult:
         findings.append(
             Finding("block", "fetch", "", None, f"scan failed: {why}")
         )
-        return _result(item, findings, source="failed", error=why)
+        result = _result(item, findings, source="failed", error=why)
+        save_scan_cache(item, result)
+        return result
 
 
 def scan_items(items: list[Item]) -> list[ScanResult]:

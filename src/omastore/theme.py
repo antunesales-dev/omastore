@@ -91,11 +91,11 @@ Screen {{
     color: {c["foreground"]};
 }}
 
-Header, Footer, #chrome, #status, #credits-line, #shot-bar, #shot-modal {{
+Header, Footer, #chrome, #status, #credits-line, #credits-bar, #shot-bar, #shot-modal {{
     background: {c["darker_background"]};
 }}
 
-#brand, #shot-bar {{
+#brand, #credits-bar, #shot-bar {{
     color: {c["accent"]};
 }}
 
@@ -140,6 +140,10 @@ Header, Footer, #chrome, #status, #credits-line, #shot-bar, #shot-modal {{
 #credits, #confirm {{
     background: {c["lighter_background"]};
     border: tall {c["accent"]};
+}}
+
+#credits-bar {{
+    color: {c["accent"]};
 }}
 
 .badge {{

@@ -148,6 +148,21 @@ def contained_child(root: Path, name: str) -> Path | None:
     return path
 
 
+def theme_repo_aliases(item) -> set[str]:
+    """Slugs from the GitHub repo basename only (not the display title)."""
+    aliases: set[str] = set()
+    repo = str(getattr(item, "repo", "") or getattr(item, "install_url", "") or "")
+    if not repo:
+        return aliases
+    cleaned = repo.strip().split("#", 1)[0].split("?", 1)[0]
+    cleaned = cleaned.rstrip("/").removesuffix(".git")
+    base = cleaned.rsplit("/", 1)[-1]
+    if base:
+        aliases.add(base.lower())
+        aliases.add(slugify(base))
+    return {a for a in aliases if a}
+
+
 def theme_aliases(item) -> set[str]:
     """Slugs that may match an installed theme directory or `omarchy theme list` name."""
     aliases: set[str] = set()
@@ -157,12 +172,5 @@ def theme_aliases(item) -> set[str]:
     name = slugify(str(getattr(item, "name", "") or ""))
     if name:
         aliases.add(name)
-    repo = str(getattr(item, "repo", "") or getattr(item, "install_url", "") or "")
-    if repo:
-        cleaned = repo.strip().split("#", 1)[0].split("?", 1)[0]
-        cleaned = cleaned.rstrip("/").removesuffix(".git")
-        base = cleaned.rsplit("/", 1)[-1]
-        if base:
-            aliases.add(base.lower())
-            aliases.add(slugify(base))
+    aliases.update(theme_repo_aliases(item))
     return {a for a in aliases if a}

@@ -102,6 +102,47 @@ def test_list_prompt_marks_verification() -> None:
     assert "Clock" in clock.plain
 
 
+def test_action_groups_includes_by_author() -> None:
+    from omastore.app import action_groups
+
+    item = Item(kind="theme", id="x", name="X", author="OldJobobo", repo="https://github.com/OldJobobo/x")
+    _do, look = action_groups(item)
+    assert "[g] by author" in look
+
+
+def test_action_groups_skip_try_apply_on_current_theme() -> None:
+    from omastore.app import action_groups
+
+    current = Item(kind="theme", id="vantablack", name="Vantablack", installed=True, current=True, builtin=True)
+    do, _look = action_groups(current)
+    assert "[t] try" not in do
+    assert "[a] apply" not in do
+    extra = Item(kind="theme", id="lumon", name="Lumon", installed=True, extra=True)
+    do, _look = action_groups(extra)
+    assert "[t] try" in do
+    assert "[a] apply" in do
+
+
+def test_list_prompt_installed_tab_skips_stars_and_badges() -> None:
+    from omastore.app import list_prompt
+
+    plugin = Item(kind="plugin", id="x", name="Demo", installed=True, verification="verified", stars=99)
+    line = list_prompt(plugin, tab="installed")
+    assert "✓" not in line.plain
+    assert "*99" not in line.plain
+
+
+def test_list_prompt_marks_outdated() -> None:
+    from omastore.app import list_prompt
+
+    behind = Item(kind="plugin", id="old", name="Old", installed=True, outdated=True, verification="verified")
+    line = list_prompt(behind)
+    assert "↑" in line.plain
+    assert "yellow" in str(line.spans)
+    fresh = list_prompt(Item(kind="plugin", id="ok", name="Ok", installed=True, verification="verified"))
+    assert "↑" not in fresh.plain
+
+
 def test_list_prompt_keeps_stars_off_the_name() -> None:
     from omastore.app import list_prompt
 
@@ -127,6 +168,24 @@ def test_markdown_can_skip_readme_and_show_loader() -> None:
     assert "# huge" not in light
     full = item_markdown(item, include_readme=True)
     assert "# huge" in full
+
+
+def test_markdown_includes_update_available() -> None:
+    item = Item(
+        kind="plugin",
+        id="old",
+        name="Old",
+        installed=True,
+        outdated=True,
+        installed_rev="aaaaaaaa",
+        latest_rev="bbbbbbbb",
+        repo="https://github.com/a/old",
+    )
+    md = item_markdown(item)
+    assert "Update available" in md
+    assert "aaaaaaaa"[:8] in md
+    assert "bbbbbbbb"[:8] in md
+    assert "[u]" in md
 
 
 def test_markdown_includes_warnings() -> None:
@@ -253,6 +312,7 @@ def test_filter_bar_is_readable() -> None:
         "plugins",
     )
     assert active == "f not-installed   v community   y verified   s sort:name   0 reset"
+    assert "f outdated" in filter_bar(Query(status="outdated"), "plugins")
     assert "limehawk" not in filter_bar(Query())
     assert "HANCORE" not in filter_bar(Query(), "plugins")
 
@@ -268,6 +328,8 @@ def test_status_line_skips_credits_and_stays_short() -> None:
     assert "limehawk" not in line
     assert "HANCORE" not in line
     assert "?" not in line
+    aged = format_status("304 themes  ·  828 plugins  ·  69 installed", 785, cache_age="5h old · r refresh")
+    assert "5h old · r refresh" in aged
     assert "trying Spacex" in line
     assert "[b] back" in line
     assert "back to Spacex" not in line
@@ -398,6 +460,43 @@ def test_theme_update_confirm_covers_all_extra_git_themes() -> None:
     prompt = confirm_prompt("update", item)
     assert "update all extra git themes?" in prompt
     assert "Lumon" in prompt
+
+
+def test_credits_footer_key_is_bracketed() -> None:
+    from omastore.app import OmaStoreApp
+
+    binding = next(b for b in OmaStoreApp.BINDINGS if b.action == "credits")
+    assert binding.key_display == "[?]"
+    assert "credits" in binding.description.lower()
+
+
+def test_credits_panel_fills_the_screen() -> None:
+    from pathlib import Path
+
+    css = (Path(__file__).resolve().parents[1] / "src" / "omastore" / "app.tcss").read_text(encoding="utf-8")
+    block = css.split("#credits {", 1)[1].split("#credits-bar", 1)[0]
+    assert "width: 1fr" in block
+    assert "height: 1fr" in block
+    assert "width: 78" not in block
+    scroll = css.split("#credits-scroll {", 1)[1].split("}", 1)[0]
+    assert "height: 1fr" in scroll
+    assert "max-height: 24" not in scroll
+
+
+def test_credits_screen_shows_version_and_changelog_tab() -> None:
+    from omastore import __version__
+    from omastore.app import CreditsScreen
+
+    screen = CreditsScreen()
+    assert screen.pane == "credits"
+    bar = screen._bar()
+    assert __version__ in bar
+    assert "[c] credits" in bar
+    assert "[l] changelog" in bar
+    keys = ",".join(binding.key for binding in screen.BINDINGS)
+    assert "l" in keys.split(",") or "l,2" in keys
+    assert any(binding.action == "show_log" for binding in screen.BINDINGS)
+    assert any(binding.action == "show_credits" for binding in screen.BINDINGS)
 
 
 def test_confirm_screen_disables_markup() -> None:
@@ -845,3 +944,143 @@ def test_notice_everyday_opens_packs_tab(monkeypatch) -> None:
     assert marked == ["seen"]
     assert tabs == ["packs"]
     assert selected == ["everyday"]
+
+
+class _Box:
+    value = ""
+
+
+class _Prevent:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_item_key_from_href() -> None:
+    from omastore.app import item_key_from_href
+
+    assert item_key_from_href("omastore:plugin:omarchy-overview") == "plugin:omarchy-overview"
+    assert item_key_from_href("omastore://theme/lumon") == "theme:lumon"
+    assert item_key_from_href("https://github.com/a/b") == ""
+
+
+def test_bulk_update_targets_only_when_outdated_filter() -> None:
+    from omastore.app import bulk_update_targets
+
+    behind = Item(
+        kind="plugin",
+        id="old",
+        name="Old",
+        installed=True,
+        outdated=True,
+        repo="https://github.com/a/old",
+    )
+    fresh = Item(kind="plugin", id="ok", name="Ok", installed=True, repo="https://github.com/a/ok")
+    shown = [behind, fresh]
+    assert bulk_update_targets(shown, "installed", Query(status="outdated")) == [behind]
+    assert bulk_update_targets(shown, "plugins", Query(status="outdated")) == [behind]
+    assert bulk_update_targets(shown, "installed", Query()) == []
+    assert bulk_update_targets(shown, "themes", Query(status="outdated")) == []
+
+
+def test_action_groups_bulk_outdated_hint() -> None:
+    item = Item(
+        kind="plugin",
+        id="old",
+        name="Old",
+        installed=True,
+        outdated=True,
+        repo="https://github.com/a/old",
+    )
+    do, _look = action_groups(item, bulk_outdated=True)
+    assert "[u] update listed" in do
+    assert "[u] update" not in do
+
+
+def test_more_by_author_keeps_current_tab() -> None:
+    from omastore.app import OmaStoreApp
+
+    app = OmaStoreApp()
+    app.tab = "themes"
+    app.selected = Item(kind="theme", id="x", name="X", author="OldJobobo")
+    notes: list[str] = []
+    box = _Box()
+    app.notify = lambda message, **_k: notes.append(str(message))  # type: ignore[method-assign]
+    app._rebuild_list = lambda: None  # type: ignore[method-assign]
+    app.query_one = lambda *_a, **_k: box  # type: ignore[method-assign]
+    app.prevent = lambda *_a, **_k: _Prevent()  # type: ignore[method-assign]
+    app.action_more_by_author()
+    assert app.tab == "themes"
+    assert app.search == "by:oldjobobo"
+    assert box.value == "by:oldjobobo"
+    assert "1 / 2" in notes[0]
+
+
+def test_g_on_pack_jumps_to_plugins() -> None:
+    from omastore.app import OmaStoreApp
+    from omastore.packs import get_pack
+
+    app = OmaStoreApp()
+    app.tab = "packs"
+    app.selected_pack = get_pack("finance")
+    app.items = [
+        Item(
+            kind="plugin",
+            id="io.github.5d0tal1gat0r.stocks",
+            name="Stocks",
+            verification="verified",
+        )
+    ]
+    notes: list[str] = []
+    box = _Box()
+    app.notify = lambda message, **_k: notes.append(str(message))  # type: ignore[method-assign]
+    app._rebuild_list = lambda: None  # type: ignore[method-assign]
+    app._paint_tabs = lambda: None  # type: ignore[method-assign]
+    app.query_one = lambda *_a, **_k: box  # type: ignore[method-assign]
+    app.prevent = lambda *_a, **_k: _Prevent()  # type: ignore[method-assign]
+    app.action_more_by_author()
+    assert app.tab == "plugins"
+    assert app.search == "pack:finance"
+    assert "Finance" in notes[0]
+
+
+def test_u_on_installed_outdated_scans_listed() -> None:
+    from omastore.app import OmaStoreApp, ScanScreen
+
+    app = OmaStoreApp()
+    app.tab = "installed"
+    app.filters = Query(status="outdated")
+    behind = Item(
+        kind="plugin",
+        id="old",
+        name="Old",
+        installed=True,
+        outdated=True,
+        repo="https://github.com/a/old",
+    )
+    app.shown = [behind]
+    pushed: list[object] = []
+    app.push_screen = lambda screen, callback=None: pushed.append(screen)  # type: ignore[method-assign]
+    app._act = lambda name: pushed.append(name)  # type: ignore[method-assign]
+    app.action_do_update()
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], ScanScreen)
+
+
+def test_maybe_pre_scan_skips_fresh_cache(monkeypatch) -> None:
+    from omastore.app import OmaStoreApp
+
+    app = OmaStoreApp()
+    called: list[str] = []
+    app._pre_scan = lambda key: called.append(key)  # type: ignore[method-assign]
+    monkeypatch.setattr("omastore.scan.scan_cache_fresh", lambda _item, **_k: True)
+    item = Item(kind="plugin", id="x", name="X", repo="https://github.com/a/x")
+    app._maybe_pre_scan(item)
+    assert called == []
+    monkeypatch.setattr("omastore.scan.scan_cache_fresh", lambda _item, **_k: False)
+    app._maybe_pre_scan(item)
+    assert called == ["plugin:x"]
+    app._maybe_pre_scan(Item(kind="theme", id="stock", name="Stock", builtin=True))
+    assert called == ["plugin:x"]
