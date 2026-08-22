@@ -1,4 +1,4 @@
-from omastore.cli import build_parser, cmd_info, cmd_pack, cmd_packs, cmd_preview, cmd_scan
+from omastore.cli import build_parser, cmd_changelog, cmd_info, cmd_pack, cmd_packs, cmd_preview, cmd_scan
 from omastore.models import Item
 from omastore.scan import Finding, ScanResult
 
@@ -61,6 +61,42 @@ def _dirty_scan(item: Item | None = None, *, failed: bool = False) -> ScanResult
 def _patch_clean_scan(monkeypatch) -> None:
     monkeypatch.setattr("omastore.scan.scan_item", lambda item, **_k: _clean_scan(item))
     monkeypatch.setattr("omastore.scan.scan_items", lambda items: [_clean_scan(item) for item in items])
+
+
+def test_about_and_changelog_subcommands(capsys) -> None:
+    from omastore import __version__
+
+    about = build_parser().parse_args(["about"])
+    assert about.func(about) == 0
+    out = capsys.readouterr().out
+    assert f"omastore {__version__}" in out
+    assert "HANCORE" in out
+
+    changelog = build_parser().parse_args(["changelog"])
+    assert changelog.func is cmd_changelog
+    assert changelog.func(changelog) == 0
+    log = capsys.readouterr().out
+    assert "0.2.5" in log
+    assert "0.2.0" in log
+
+
+def test_search_author_flag_parses() -> None:
+    args = build_parser().parse_args(["search", "--author", "OldJobobo", "--kind", "theme"])
+    from omastore.cli import _query_from_args
+
+    query = _query_from_args(args)
+    assert query.author == "oldjobobo"
+    assert query.kind == "theme"
+
+
+def test_list_outdated_flag_parses() -> None:
+    args = build_parser().parse_args(["list", "--outdated", "--kind", "plugin"])
+    assert args.outdated is True
+    from omastore.cli import _query_from_args
+
+    query = _query_from_args(args)
+    assert query.status == "outdated"
+    assert query.kind == "plugin"
 
 
 def test_preview_subcommand_wires_cmd_preview() -> None:
@@ -526,3 +562,78 @@ def test_install_when_not_can_install_returns_1(monkeypatch, capsys) -> None:
     assert args.func(args) == 1
     assert called == []
     assert capsys.readouterr().out.strip() == "cannot install plugin:foo"
+
+
+def _outdated_plugin() -> Item:
+    return _item(
+        id="old",
+        name="Old",
+        installed=True,
+        outdated=True,
+        repo="https://github.com/a/old",
+        install_url="https://github.com/a/old",
+    )
+
+
+def test_update_outdated_flag_parses() -> None:
+    args = build_parser().parse_args(["update", "--outdated"])
+    assert args.outdated is True
+    assert args.id is None
+    single = build_parser().parse_args(["update", "plugin:old"])
+    assert single.id == "plugin:old"
+    assert single.outdated is False
+
+
+def test_update_without_id_or_outdated_prints_usage(capsys) -> None:
+    args = build_parser().parse_args(["update"])
+    assert args.func(args) == 2
+    assert "usage: omastore update" in capsys.readouterr().out
+
+
+def test_update_outdated_without_yes_returns_2(monkeypatch, capsys) -> None:
+    item = _outdated_plugin()
+    called: list[object] = []
+    _patch_clean_scan(monkeypatch)
+    monkeypatch.setattr("omastore.cli._load", lambda force=False: ([item], object()))
+    monkeypatch.setattr("omastore.cli.update_outdated", lambda *a, **k: called.append(item) or [])
+    args = build_parser().parse_args(["update", "--outdated"])
+    assert args.func(args) == 2
+    assert called == []
+    out = capsys.readouterr().out
+    assert "update 1 outdated extra?" in out
+    assert "plugin:old" in out
+    assert "pass --yes to proceed" in out
+
+
+def test_update_outdated_with_yes_calls_helper(monkeypatch, capsys) -> None:
+    item = _outdated_plugin()
+    _patch_clean_scan(monkeypatch)
+    monkeypatch.setattr("omastore.cli._load", lambda force=False: ([item], object()))
+    monkeypatch.setattr(
+        "omastore.cli.update_outdated",
+        lambda items, **k: [(items[0], _Result(message="updated"))],
+    )
+    args = build_parser().parse_args(["--yes", "update", "--outdated"])
+    assert args.func(args) == 0
+    assert "plugin:old: updated" in capsys.readouterr().out
+
+
+def test_update_outdated_blocked_scan_does_not_run(monkeypatch, capsys) -> None:
+    item = _outdated_plugin()
+    called: list[object] = []
+    monkeypatch.setattr("omastore.scan.scan_items", lambda items: [_dirty_scan(row) for row in items])
+    monkeypatch.setattr("omastore.cli._load", lambda force=False: ([item], object()))
+    monkeypatch.setattr("omastore.cli.update_outdated", lambda *a, **k: called.append(item) or [])
+    args = build_parser().parse_args(["--yes", "update", "--outdated"])
+    assert args.func(args) == 2
+    assert called == []
+    out = capsys.readouterr().out
+    assert "update --outdated blocked at plugin:old" in out
+    assert "--i-accept-scan-risks" in out
+
+
+def test_update_outdated_nothing(monkeypatch, capsys) -> None:
+    monkeypatch.setattr("omastore.cli._load", lambda force=False: ([], object()))
+    args = build_parser().parse_args(["--yes", "update", "--outdated"])
+    assert args.func(args) == 0
+    assert capsys.readouterr().out.strip() == "nothing outdated"

@@ -22,6 +22,29 @@ PLUGIN_CATALOG_URL = (
     "main/site/catalog.json"
 )
 DEFAULT_TTL = 6 * 60 * 60
+_CACHE_FILES = ("themes-data.json", "plugins-catalog.json")
+
+
+def catalog_cache_age_label(*, now: float | None = None) -> str:
+    """Human age of the older catalog cache file, e.g. '5h old · r refresh'."""
+    now = time.time() if now is None else now
+    mtimes: list[float] = []
+    root = cache_dir()
+    for name in _CACHE_FILES:
+        path = root / name
+        try:
+            mtimes.append(path.stat().st_mtime)
+        except OSError:
+            continue
+    if not mtimes:
+        return ""
+    age = max(0.0, now - min(mtimes))
+    if age < 90:
+        return "just now"
+    if age < 3600:
+        return f"{int(age // 60)}m old"
+    hours = int(age // 3600)
+    return f"{hours}h old · r refresh"
 
 
 def cache_dir() -> Path:

@@ -196,10 +196,12 @@ def pack_markdown(pack: Pack, items: list[Item]) -> str:
         return "\n".join(bits)
     for item in members:
         stars = f" · *{item.stars}" if item.stars else ""
-        bits.append(f"- {pack_member_state(item)}  **{item.name}**{stars}")
+        bits.append(f"- {pack_member_state(item)}  [**{item.name}**](omastore:{item.key}){stars}")
         loc = item.repo or item.install_url
         if loc:
             bits.append(f"  `{loc}`")
+    bits.append("")
+    bits.append("Press `g` to list these plugins, or click a name.")
     return "\n".join(bits)
 
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from omastore.models import Item, slugify
-from omastore.safety import contained_child, theme_aliases
+from omastore.safety import contained_child, theme_aliases, theme_repo_aliases
 
 
 def _home() -> Path:
@@ -421,28 +421,109 @@ def load_local() -> LocalState:
     return state
 
 
+def theme_list_name(aliases: set[str], local: LocalState) -> str:
+    """Display name from `omarchy theme list`, else an installed directory basename."""
+    needles = {alias for alias in aliases if alias} | {slugify(alias) for alias in aliases if alias}
+    needles.discard("")
+    for alias in needles:
+        name = local.theme_names.get(alias)
+        if name:
+            return name
+    for alias in needles:
+        path = installed_theme_path(alias) or _existing_child(stock_themes_dir(), alias)
+        if path is not None:
+            return path.name
+    extra = needles & (local.extra_slugs | local.stock_slugs)
+    if extra:
+        return max(extra, key=len)
+    return ""
+
+
+def omarchy_theme_name(item: Item, local: LocalState | None = None) -> str:
+    """Operand for `omarchy theme set`. Catalog titles like Retro '82 are not always valid."""
+    stored = str(getattr(item, "local_name", "") or "").strip()
+    if stored:
+        return stored
+    aliases = theme_aliases(item)
+    ident = str(getattr(item, "id", "") or "")
+    if ident:
+        aliases.add(ident)
+        aliases.add(slugify(ident))
+    name = str(getattr(item, "name", "") or "")
+    if name:
+        aliases.add(slugify(name))
+    state = local if local is not None else load_local()
+    found = theme_list_name(aliases, state)
+    if found:
+        return found
+    return ident or name
+
+
+def local_fingerprint() -> tuple:
+    """Cheap disk snapshot: current theme link, extra themes, plugins, shell.json."""
+    paths = (
+        Path.home() / ".local/state/omarchy/current/theme",
+        user_themes_dir(),
+        user_plugins_dir(),
+        shell_json_path(),
+    )
+    rows: list[tuple[str, int, str]] = []
+    for path in paths:
+        try:
+            st = path.lstat()
+            target = ""
+            if path.is_symlink():
+                try:
+                    target = str(path.resolve(strict=False))
+                except OSError:
+                    target = os.readlink(path)
+            rows.append((str(path), int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))), target))
+        except OSError:
+            rows.append((str(path), 0, ""))
+    return tuple(rows)
+
+
 def overlay(items: list[Item], local: LocalState) -> list[Item]:
+    incoming = [item for item in items if not item.local_only]
     known_theme_slugs: set[str] = set()
-    known_plugin_ids = {item.id for item in items if item.kind == "plugin"}
+    known_plugin_ids = {item.id for item in incoming if item.kind == "plugin"}
     local_slugs = set(local.theme_names) | local.extra_slugs | local.stock_slugs
     result: list[Item] = []
 
-    for item in items:
+    for item in incoming:
         if item.kind == "theme":
             aliases = theme_aliases(item)
-            known_theme_slugs.update(aliases)
-            if item.id:
-                known_theme_slugs.add(item.id)
-            item.installed = bool(aliases & local_slugs)
-            item.current = local.current_slug in aliases
-            item.extra = bool(aliases & local.extra_slugs)
-            item.builtin = item.builtin or (bool(aliases & local.stock_slugs) and not item.extra)
+            repo_al = theme_repo_aliases(item)
+            id_al = {a for a in (item.id.lower(), slugify(item.id)) if a}
+            title_al = {a for a in (slugify(item.name),) if a} - id_al
+            title_stock_collision = bool(title_al & local.stock_slugs) and not bool(
+                id_al & local.stock_slugs
+            ) and not bool(repo_al & local.stock_slugs)
+            if repo_al and title_stock_collision and not (repo_al & local.extra_slugs):
+                item.installed = False
+                item.current = False
+                item.extra = False
+                item.builtin = False
+            else:
+                item.installed = bool(aliases & local_slugs)
+                item.current = local.current_slug in aliases
+                item.extra = bool(aliases & local.extra_slugs)
+                item.builtin = bool(item.builtin) or (
+                    bool(aliases & local.stock_slugs) and not item.extra
+                )
+            item.local_name = theme_list_name(aliases, local)
+            known_theme_slugs.update(id_al)
+            if item.installed:
+                known_theme_slugs.update(aliases & local_slugs)
         else:
             row = local.plugins.get(item.id)
             if row:
                 item.installed = True
                 item.enabled = bool(row.get("enabled"))
                 item.first_party = bool(row.get("firstParty")) or item.first_party
+            else:
+                item.installed = False
+                item.enabled = False
         result.append(item)
 
     for slug, name in local.theme_names.items():
@@ -461,6 +542,7 @@ def overlay(items: list[Item], local: LocalState) -> list[Item]:
                 extra=slug in local.extra_slugs,
                 builtin=slug in local.stock_slugs and slug not in local.extra_slugs,
                 local_only=True,
+                local_name=name,
                 description="Installed locally. Not listed in the community catalog.",
             )
         )
@@ -480,6 +562,7 @@ def overlay(items: list[Item], local: LocalState) -> list[Item]:
                 extra=slug in local.extra_slugs,
                 builtin=slug in local.stock_slugs and slug not in local.extra_slugs,
                 local_only=True,
+                local_name=slug,
                 description="Installed locally. Not listed in the community catalog.",
             )
         )

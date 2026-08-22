@@ -1,5 +1,9 @@
 """Attribution for catalogs and third-party work omastore reads."""
 
+from pathlib import Path
+
+from omastore import __version__
+
 THEME_STORE_NAME = "omarchytheme.com"
 THEME_STORE_AUTHOR = "limehawk"
 THEME_STORE_REPO = "https://github.com/limehawk/omarchy-theme-website"
@@ -32,11 +36,11 @@ use their websites. This app is a convenience client.
 
 ## This client
 
-**omastore**
+**omastore {__version__}**
 {OMASTORE_REPO}
 
 Source, issues, and PRs for the terminal client live there.
-It does not host themes or plugins.
+It does not host themes or plugins. Press `?` then `l` for the changelog.
 
 ## Theme catalog — thank you, {THEME_STORE_AUTHOR}
 
@@ -83,3 +87,20 @@ community client. It is not affiliated with, sponsored by, or
 endorsed by Omarchy, 37signals, {THEME_STORE_NAME}, or
 {PLUGIN_STORE_NAME}.
 """
+
+
+def changelog_text() -> str:
+    """Installed copy first, then the repo-root file when running from a checkout."""
+    here = Path(__file__).resolve()
+    for path in (here.parent / "CHANGELOG.md", here.parents[2] / "CHANGELOG.md"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if text.strip():
+            return text
+    return (
+        f"# Changelog\n\n"
+        f"## {__version__}\n\n"
+        "Changelog is not installed with this build.\n"
+    )

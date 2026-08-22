@@ -1,6 +1,17 @@
 import subprocess
 
-from omastore.actions import ActionResult, apply_theme, disable_plugin, enable_plugin, install, install_pack, remove, remove_pack
+from omastore.actions import (
+    ActionResult,
+    apply_theme,
+    describe_outdated_update,
+    disable_plugin,
+    enable_plugin,
+    install,
+    install_pack,
+    remove,
+    remove_pack,
+    update_outdated,
+)
 from omastore.models import Item
 
 
@@ -177,6 +188,60 @@ def test_remove_pack_skips_not_installed(monkeypatch) -> None:
     assert calls == ["have"]
 
 
+def test_apply_theme_uses_omarchy_list_name(monkeypatch) -> None:
+    seen: list[tuple] = []
+
+    class _Ok:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    def fake(*args, **kwargs):
+        seen.append(args)
+        return _Ok()
+
+    monkeypatch.setattr("omastore.actions.run_omarchy", fake)
+    monkeypatch.setattr(
+        "omastore.local.load_local",
+        lambda: (_ for _ in ()).throw(AssertionError("local_name should skip load_local")),
+    )
+    item = Item(
+        kind="theme",
+        id="retro-82",
+        name="Retro '82",
+        local_name="Retro 82",
+        installed=True,
+        builtin=True,
+    )
+    result = apply_theme(item)
+    assert result.ok is True
+    assert seen == [("theme", "set", "Retro 82")]
+
+
+def test_update_refuses_failed_scan(monkeypatch) -> None:
+    from omastore.actions import update
+    from omastore.scan import Finding, ScanResult
+
+    def fail(*args, **kwargs):
+        raise AssertionError("omarchy should not run when the scan fails")
+
+    monkeypatch.setattr("omastore.actions.run_omarchy", fail)
+    dirty = ScanResult(
+        item_key="plugin:foo",
+        item_id="foo",
+        item_name="Foo",
+        kind="plugin",
+        repo="https://github.com/example/foo",
+        verdict="block",
+        findings=[Finding("block", "fetch", "", None, "scan failed: boom")],
+        source="failed",
+        error="boom",
+    )
+    result = update(_plugin(installed=True, repo="https://github.com/example/foo"), scan_result=dirty)
+    assert result.ok is False
+    assert "scan failed" in result.message
+
+
 def test_apply_plugin_fails(monkeypatch) -> None:
     def fail(*args, **kwargs):
         raise AssertionError("omarchy should not run when apply is for a plugin")
@@ -209,6 +274,102 @@ def test_disable_plugin_restores_hidden_first(monkeypatch) -> None:
     result = disable_plugin(_plugin(id="groups.plugin", installed=True, enabled=True))
     assert result.ok is True
     assert called == ["groups.plugin"]
+
+
+def _clean_scan(item: Item):
+    from omastore.scan import ScanResult
+
+    return ScanResult(
+        item_key=item.key,
+        item_id=item.id,
+        item_name=item.name,
+        kind=item.kind,
+        repo=item.repo or item.install_url or "",
+        verdict="clean",
+        source="tree",
+    )
+
+
+def test_update_outdated_themes_share_one_command(monkeypatch) -> None:
+    calls: list[tuple] = []
+
+    class _Ok:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    monkeypatch.setattr("omastore.actions.run_omarchy", lambda *a, **k: calls.append(a) or _Ok())
+    t1 = _theme(id="a", extra=True, installed=True, install_url="https://github.com/a/a")
+    t2 = _theme(id="b", extra=True, installed=True, install_url="https://github.com/a/b")
+    plugin = _plugin(id="c", installed=True, repo="https://github.com/a/c")
+    rows = [t1, t2, plugin]
+    results = update_outdated(rows, scans={item.key: _clean_scan(item) for item in rows})
+    assert calls == [("theme", "update"), ("plugin", "update", "c", "--yes")]
+    assert [item.id for item, _ in results] == ["a", "b", "c"]
+    assert all(result.ok for _, result in results)
+
+
+def test_update_outdated_stops_on_blocked_scan(monkeypatch) -> None:
+    from omastore.scan import Finding, ScanResult
+
+    def fail(*args, **kwargs):
+        raise AssertionError("omarchy should not run when a member is blocked")
+
+    monkeypatch.setattr("omastore.actions.run_omarchy", fail)
+    a = _plugin(id="a", installed=True, repo="https://github.com/a/a")
+    b = _plugin(id="b", installed=True, repo="https://github.com/a/b")
+    dirty = ScanResult(
+        item_key=b.key,
+        item_id=b.id,
+        item_name=b.name,
+        kind=b.kind,
+        repo=b.repo,
+        verdict="block",
+        findings=[Finding("block", "network", "a.qml", 1, "fetch(")],
+        source="tree",
+    )
+    results = update_outdated([a, b], scans={a.key: _clean_scan(a), b.key: dirty})
+    assert [item.id for item, _ in results] == ["b"]
+    assert results[0][1].ok is False
+    assert "fetch(" in results[0][1].message
+
+
+def test_update_outdated_plugin_failure_stops(monkeypatch) -> None:
+    calls: list[tuple] = []
+
+    class _Ok:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    class _Bad:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    def fake(*args, **kwargs):
+        calls.append(args)
+        return _Bad() if args[:2] == ("plugin", "update") and args[2] == "b" else _Ok()
+
+    monkeypatch.setattr("omastore.actions.run_omarchy", fake)
+    a = _plugin(id="a", installed=True, repo="https://github.com/a/a")
+    b = _plugin(id="b", installed=True, repo="https://github.com/a/b")
+    c = _plugin(id="c", installed=True, repo="https://github.com/a/c")
+    rows = [a, b, c]
+    results = update_outdated(rows, scans={item.key: _clean_scan(item) for item in rows})
+    assert [item.id for item, _ in results] == ["a", "b"]
+    assert results[1][1].ok is False
+    assert ("plugin", "update", "c", "--yes") not in calls
+
+
+def test_describe_outdated_update_warns_about_theme_command() -> None:
+    theme = _theme(id="lumon", extra=True, installed=True, install_url="https://github.com/a/lumon")
+    plugin = _plugin(id="old", installed=True, repo="https://github.com/a/old", outdated=True)
+    text = describe_outdated_update([theme, plugin])
+    assert "update 2 outdated extras?" in text
+    assert "every extra git theme" in text
+    assert "theme:lumon" in text
+    assert "plugin:old" in text
 
 
 def test_remove_dry_run_does_not_restore(monkeypatch) -> None:

@@ -26,9 +26,11 @@ It is meant to stay simple.
 
 1. Open `omastore`.
 2. Type `/` and search, or press `1` / `2` / `3` / `4` for themes, plugins, installed, or suggested packs.
-3. Filter with `f` (installed / available / extra / stock), `v` (community / built-in), and `s` (stars / name / recent). You can also type prefixes in the search box: `hue:blue`, `tag:bar`, `is:available`, `src:community`.
-4. Installed themes show a filled **●** (green if it is the current theme, cyan otherwise) and sort above catalog-only rows. Plugin rows show a green **✓** when the HANCORE catalog verified them, or a yellow **−** when they are unverified. On the plugins tab, `f` is installed / not installed, `v` is community / built-in, `y` is verified / unverified, and `s` sorts by rating. You can also type `is:installed`, `is:not-installed`, `src:builtin`, `verified:yes`, `stars:10`.
+3. Filter with `f` (installed / available / extra / stock / **outdated**), `v` (community / built-in), and `s` (stars / name / recent). You can also type prefixes in the search box: `hue:blue`, `tag:bar`, `by:oldjobobo`, `is:available`, `is:outdated`, `is:updatable`, `src:community`. On a listing, `g` shows more from the same author on the **current** tab (`1` / `2` for the other kind). On a pack, `g` (or clicking a member name) opens those plugins.
+4. The **installed** tab groups current theme, extra themes, community plugins, then built-in plugins. Stock themes are not dumped into that list (use `v` built-in if you want them). Installed themes on other tabs show a filled **●** (green if it is the current theme, cyan otherwise) and sort above catalog-only rows. Plugin rows show a green **✓** when the HANCORE catalog verified them, or a yellow **−** when they are unverified. A yellow **↑** means git HEAD is behind and `[u]` updates it. On Installed or Plugins with `f` outdated, `u` scans every listed extra, then updates (one `omarchy theme update` for extra git themes). On the plugins tab, `f` is installed / not-installed / outdated, `v` is community / built-in, `y` is verified / unverified, and `s` sorts by rating (outdated rows stay at the top). You can also type `is:installed`, `is:not-installed`, `is:outdated`, `src:builtin`, `verified:yes`, `stars:10`. On the installed tab, `f` is all / extra / outdated.
 5. Press `enter` (or `i`) to install. omastore first scans a copy of the repo without running it (`checking repo…`). Clean listings get the usual confirm (repo, verified, catalog warnings), then the official `omarchy` command. Hits stop the install: abort, open a prefilled report draft, or install anyway after a second confirm. Packs are hand-picked verified plugins from the HANCORE catalog (Everyday, Developer, Finance, Designer, Music, Artist, Gamer), not a keyword dump and not a new store. In a pack, **●** is already installed and **○** is still to install. `i` scans every remaining plugin, confirms if they are all clean, then installs them one by one. A blocked member fails the whole pack. `x` confirms every installed member, then removes them one by one. A plugin that also sits in another pack is still removed.
+
+While the TUI is open it follows the current Omarchy theme (including colors) and installed plugins. Catalog JSON still caches for six hours; `r` refreshes it.
 
 You do not browse a new store. You browse **their** catalogs, then Omarchy does the install. How we relate to those projects is in [COMMUNITY.md](COMMUNITY.md).
 
@@ -45,7 +47,7 @@ omastore does not create or host the listings.
 
 The plugin marketplace itself credits [bjarneo](https://github.com/bjarneo) for interface inspiration and limehawk's theme site for its submission workflow.
 
-Press `?` in the TUI, or run `omastore about`. Full third-party rights notes are in [NOTICE.md](NOTICE.md). How this relates to the catalogs, and a note you can send the authors, is in [COMMUNITY.md](COMMUNITY.md).
+Press `?` in the TUI for credits, version, and a changelog tab (`l`). Or run `omastore about` / `omastore changelog`. Full third-party rights notes are in [NOTICE.md](NOTICE.md). How this relates to the catalogs, and a note you can send the authors, is in [COMMUNITY.md](COMMUNITY.md).
 
 ## Install
 
@@ -91,7 +93,10 @@ omastore search overview --kind plugin
 omastore search hue:blue is:available --sort stars
 omastore search --category widgets --tag bar --available
 omastore list --installed --source community
+omastore list --outdated
+omastore search is:outdated --kind plugin
 omastore outdated
+omastore update --outdated --yes
 omastore try theme:lumon
 omastore revert
 omastore open theme:lumon
@@ -107,6 +112,7 @@ omastore remove plugin:omarchy-overview
 omastore list --installed
 omastore refresh
 omastore about
+omastore changelog
 omastore mcp                      # stdio MCP (browse/audit; mutate off unless OMASTORE_MCP_ALLOW_MUTATE=1)
 ```
 
@@ -114,7 +120,7 @@ omastore mcp                      # stdio MCP (browse/audit; mutate off unless O
 
 `omastore mcp` is a stdio MCP server over the **same** limehawk and HANCORE catalogs. It is an agent client, not a new store.
 
-Read-only tools: `search`, `info`, `installed`, `packs`, `pack`, `audit`, `hidden_widgets`, `scan`.
+Read-only tools: `search`, `info`, `installed`, `packs`, `pack`, `audit`, `hidden_widgets`, `scan`, `outdated`.
 
 Install/remove/enable/disable are **not registered** unless `OMASTORE_MCP_ALLOW_MUTATE=1`. Even then they require `confirm: true` and use official `omarchy` commands. Install also runs the no-execute scan; `confirm` is not enough when the scan reports issues (`accept_scan_risks`), and a failed scan cannot be overridden. They never execute catalog `installCommand` strings.
 
@@ -137,7 +143,7 @@ Example Cursor/Claude config:
 | --- | --- |
 | `/` | search (also `hue:blue`, `tag:bar`, `is:available`) |
 | `1` `2` `3` `4` | themes / plugins / installed / packs |
-| `f` | installed / not-installed / all |
+| `f` | installed / not-installed / outdated / all |
 | `v` | community / built-in / all |
 | `y` | verified / unverified / all (plugins tab only) |
 | `s` | sort: stars, name, recent |
@@ -146,13 +152,14 @@ Example Cursor/Claude config:
 | `i` | install |
 | `t` / `b` | try an installed theme (does not freeze the list) / restore the previous one |
 | `o` / `c` | open the author repo / catalog site |
+| `g` | more from this author (same tab); on a pack: show those plugins |
 | `p` | enlarge the screenshot (`+`/`−` zoom, arrows pan, `o` opens the file) |
 | `a` | apply theme |
 | `e` / `d` | enable / disable plugin |
-| `u` | update |
+| `u` | update (on Installed/`f outdated`: every listed extra) |
 | `x` | remove (on a pack: every installed member) |
 | `r` | refresh catalogs |
-| `?` | credits |
+| `?` | credits (version + changelog tab) |
 | `q` | quit |
 
 Theme detail shows the catalog palette. After you settle on a row, omastore also shows a 16:9 screenshot: the theme's own `preview.png` if it is installed, otherwise a catalog or GitHub image, rendered with Sixel (Foot) or Kitty graphics (Ghostty) via textual-image, with half-block as fallback (`p` opens the file). Thin plugin listings fill empty fields from the author's `manifest.json` without overwriting catalog text. Plugin about is still the marketplace listing plus the upstream README.

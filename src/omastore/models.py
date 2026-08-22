@@ -82,6 +82,7 @@ class Item:
     outdated: bool = False
     kinds: list[str] = field(default_factory=list)
     extra_details: bool = False
+    local_name: str = ""  # `omarchy theme set` / list name when it differs from catalog title
 
     @property
     def key(self) -> str:
@@ -107,6 +108,8 @@ class Item:
             parts.append("stock")
         elif self.extra:
             parts.append("extra")
+        if self.outdated:
+            parts.append("outdated")
         return " · ".join(parts)
 
     @property

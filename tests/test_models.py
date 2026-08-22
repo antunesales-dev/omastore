@@ -81,3 +81,13 @@ def test_verification_label_for_verified_and_builtin() -> None:
     )
     assert verified.verification_label == "verified"
     assert builtin.verification_label == ""
+
+
+def test_status_label_includes_outdated() -> None:
+    from omastore.models import Item
+
+    plugin = Item(kind="plugin", id="x", name="X", installed=True, enabled=True, outdated=True)
+    assert "on" in plugin.status_label
+    assert "outdated" in plugin.status_label
+    theme = Item(kind="theme", id="lumon", name="Lumon", extra=True, installed=True, outdated=True)
+    assert "outdated" in theme.status_label

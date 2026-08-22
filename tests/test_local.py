@@ -15,6 +15,21 @@ from omastore.local import (
 )
 
 
+def test_local_fingerprint_changes_with_mtime(tmp_path: Path, monkeypatch) -> None:
+    from omastore import local as local_mod
+
+    monkeypatch.setattr(local_mod, "_home", lambda: tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    theme = tmp_path / ".local/state/omarchy/current/theme"
+    theme.parent.mkdir(parents=True)
+    theme.symlink_to(tmp_path / "a")
+    first = local_mod.local_fingerprint()
+    theme.unlink()
+    theme.symlink_to(tmp_path / "b")
+    second = local_mod.local_fingerprint()
+    assert first != second
+
+
 def test_dir_slugs_includes_lowercase_and_slugify(tmp_path: Path) -> None:
     (tmp_path / "Tokyo Night").mkdir()
     (tmp_path / "notes.txt").write_text("skip", encoding="utf-8")

@@ -154,6 +154,9 @@ def test_pack_markdown_marks_installed_first() -> None:
     assert "○ to install" in text
     assert text.index("● installed · on") < text.index("○ to install")
     assert text.index("**Crypto Pulse**") < text.index("**Stocks**")
+    assert f"](omastore:plugin:{CRYPTO})" in text
+    assert f"](omastore:plugin:{STOCKS})" in text
+    assert "Press `g` to list these plugins" in text
 
 
 def test_describe_pack_remove_lists_installed() -> None:

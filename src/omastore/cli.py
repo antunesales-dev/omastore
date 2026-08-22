@@ -5,7 +5,16 @@ import sys
 from typing import Sequence
 
 from omastore import __version__
-from omastore.actions import apply_theme, disable_plugin, enable_plugin, install, remove, update
+from omastore.actions import (
+    apply_theme,
+    describe_outdated_update,
+    disable_plugin,
+    enable_plugin,
+    install,
+    remove,
+    update,
+    update_outdated,
+)
 from omastore.catalog import load_store
 from omastore.filters import Query, apply_query, parse_search
 from omastore.models import Item, Tab
@@ -78,10 +87,14 @@ def _query_from_args(args: argparse.Namespace, text: str = "") -> Query:
         query = Query(**{**query.__dict__, "category": args.category.lower()})
     if getattr(args, "tag", None):
         query = Query(**{**query.__dict__, "tag": args.tag.lower()})
+    if getattr(args, "author", None):
+        query = query.with_author(args.author)
     if getattr(args, "source", None):
         query = query.with_source(args.source)
     if getattr(args, "sort", None):
         query = query.with_sort(args.sort)
+    if getattr(args, "outdated", False):
+        query = query.with_status("outdated")
     if getattr(args, "verified", False):
         query = Query(**{**query.__dict__, "verified": "yes"})
     if getattr(args, "builtin", False):
@@ -94,10 +107,12 @@ def _query_from_args(args: argparse.Namespace, text: str = "") -> Query:
 def _add_filter_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--kind", choices=("theme", "plugin"))
     parser.add_argument("--installed", action="store_true")
+    parser.add_argument("--outdated", action="store_true", help="installed extras whose git HEAD is behind")
     parser.add_argument("--available", action="store_true", help="not installed and installable")
     parser.add_argument("--hue", help="theme hue, e.g. blue")
     parser.add_argument("--category", help="plugin category, e.g. widgets")
     parser.add_argument("--tag", help="plugin or theme tag")
+    parser.add_argument("--author", help="catalog author or GitHub owner")
     parser.add_argument("--source", choices=("community", "builtin"))
     parser.add_argument("--verified", action="store_true")
     parser.add_argument("--builtin", action="store_true", help="built-in / stock plugins")
@@ -171,7 +186,55 @@ def _scan_for_install(item: Item, args: argparse.Namespace, *, pack_id: str = ""
     return result, 2
 
 
+def cmd_update_outdated(args: argparse.Namespace) -> int:
+    from omastore.scan import scan_items
+    from omastore.updates import outdated_items
+
+    items, _ = _load(force=args.refresh)
+    rows = [item for item in outdated_items(items) if item.can_update]
+    if not rows:
+        print("nothing outdated")
+        return 0
+    print("checking repo…", file=sys.stderr)
+    scans = scan_items(rows)
+    accept = bool(getattr(args, "accept_scan_risks", False))
+    blocked = [row for row in scans if not row.allows_install(accept)]
+    if blocked:
+        first = blocked[0]
+        print(f"update --outdated blocked at {first.item_key}")
+        print(first.format_full())
+        extra = blocked[1:]
+        if extra:
+            print(f"{len(extra)} more listing(s) also had findings")
+        if any(row.source == "failed" or row.error for row in blocked):
+            print("scan failed; update refused (fail closed)")
+        else:
+            print("pass --yes --i-accept-scan-risks to proceed anyway")
+        return 2
+    if not args.yes and not args.dry_run:
+        print(describe_outdated_update(rows))
+        print("pass --yes to proceed")
+        return 2
+    failed = False
+    by_key = {row.item_key: row for row in scans}
+    for item, result in update_outdated(
+        rows,
+        dry_run=args.dry_run,
+        accept_scan_risks=accept,
+        scans=by_key,
+    ):
+        print(f"{item.key}: {result.message}")
+        if not result.ok:
+            failed = True
+    return 1 if failed else 0
+
+
 def _act(args: argparse.Namespace, name: str) -> int:
+    if name == "update" and getattr(args, "outdated", False):
+        return cmd_update_outdated(args)
+    if name == "update" and not getattr(args, "id", None):
+        print("usage: omastore update <id>  or  omastore update --outdated")
+        return 2
     items, _ = _load(force=args.refresh)
     item = _find(items, args.id)
     allowed = {
@@ -186,19 +249,29 @@ def _act(args: argparse.Namespace, name: str) -> int:
         print(f"cannot {name} {item.key}")
         return 1
     scan_result = None
-    if name == "install":
+    if name in {"install", "update"}:
         scan_result, code = _scan_for_install(item, args)
         if code != 0:
             return code
     if name in {"install", "remove", "update", "enable"} and not args.yes and not args.dry_run:
         _print_confirm(item, name)
         return 2
+    accept = bool(getattr(args, "accept_scan_risks", False))
     if name == "install":
         result = install(
             item,
             dry_run=args.dry_run,
             scan_result=scan_result,
-            accept_scan_risks=bool(getattr(args, "accept_scan_risks", False)),
+            accept_scan_risks=accept,
+        )
+        print(result.message)
+        return 0 if result.ok else 1
+    if name == "update":
+        result = update(
+            item,
+            dry_run=args.dry_run,
+            scan_result=scan_result,
+            accept_scan_risks=accept,
         )
         print(result.message)
         return 0 if result.ok else 1
@@ -206,7 +279,6 @@ def _act(args: argparse.Namespace, name: str) -> int:
         "apply": apply_theme,
         "enable": enable_plugin,
         "disable": disable_plugin,
-        "update": update,
         "remove": remove,
     }
     result = runners[name](item, dry_run=args.dry_run)
@@ -231,7 +303,16 @@ def cmd_list(args: argparse.Namespace) -> int:
 def cmd_about(_args: argparse.Namespace) -> int:
     from omastore.credits import ABOUT
 
+    print(f"omastore {__version__}")
+    print()
     print(ABOUT)
+    return 0
+
+
+def cmd_changelog(_args: argparse.Namespace) -> int:
+    from omastore.credits import changelog_text
+
+    print(changelog_text())
     return 0
 
 
@@ -265,7 +346,9 @@ def cmd_try(args: argparse.Namespace) -> int:
     item = _find(items, args.id)
     if item.kind != "theme":
         raise SystemExit("try is for themes")
-    result = remember_and_apply(item.name)
+    from omastore.local import omarchy_theme_name
+
+    result = remember_and_apply(omarchy_theme_name(item) or item.name)
     print(result.get("message") or result)
     return 0 if result.get("ok") else 1
 
@@ -498,11 +581,19 @@ def build_parser() -> argparse.ArgumentParser:
         ("apply", "apply an installed theme"),
         ("enable", "enable an installed plugin"),
         ("disable", "disable an installed plugin"),
-        ("update", "update an installed extra theme or plugin"),
+        ("update", "update an installed extra theme or plugin, or all outdated extras"),
         ("remove", "remove an extra theme or community plugin"),
     ):
         cmd = sub.add_parser(name, help=help_text)
-        cmd.add_argument("id")
+        if name == "update":
+            cmd.add_argument("id", nargs="?", help="theme or plugin id; omit with --outdated")
+            cmd.add_argument(
+                "--outdated",
+                action="store_true",
+                help="scan and update every outdated extra (stop on first block)",
+            )
+        else:
+            cmd.add_argument("id")
         cmd.set_defaults(func=lambda args, action=name: _act(args, action))
 
     refresh = sub.add_parser("refresh", help="download fresh catalogs")
@@ -510,6 +601,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     about = sub.add_parser("about", help="print catalog credits")
     about.set_defaults(func=cmd_about)
+
+    changelog = sub.add_parser("changelog", help="print omastore versions and what changed")
+    changelog.set_defaults(func=cmd_changelog)
 
     desktop = sub.add_parser("desktop", help="install the Omarchy app launcher entry")
     desktop.set_defaults(func=cmd_desktop)

@@ -240,6 +240,64 @@ def tool_hidden_widgets(args: dict[str, Any], _items: list[Item]) -> dict[str, A
     return _ok({"ok": True, "id": plugin_id, "hidden": hidden})
 
 
+def tool_outdated(_args: dict[str, Any], items: list[Item]) -> dict[str, Any]:
+    from omastore.updates import outdated_items
+
+    rows = outdated_items(items)
+    return _ok({"ok": True, "count": len(rows), "items": [item_payload(item) for item in rows]})
+
+
+def tool_pack_install(args: dict[str, Any], items: list[Item]) -> dict[str, Any]:
+    if not mutate_allowed():
+        return _err("mutate disabled; set OMASTORE_MCP_ALLOW_MUTATE=1 to enable install/remove")
+    pack_id = str(args.get("id") or "").strip()
+    pack = get_pack(pack_id)
+    if pack is None:
+        return _err(f"unknown pack {pack_id!r}")
+    pending = pack.pending(items)
+    if not pending:
+        return _ok({"ok": True, "message": "nothing to install", "id": pack.id})
+    if not args.get("confirm"):
+        return _ok(
+            {
+                "ok": False,
+                "need_confirm": True,
+                "id": pack.id,
+                "preview": "\n".join(item.key for item in pending) + "\npass confirm=true to proceed",
+            }
+        )
+    from omastore.actions import install_pack
+    from omastore.scan import first_issue, scan_items
+
+    scans = scan_items(pending)
+    issue = first_issue(scans)
+    accept = bool(args.get("accept_scan_risks"))
+    if issue is not None and not issue.allows_install(accept):
+        from omastore.scan import scan_payload
+
+        return _ok(
+            {
+                "ok": False,
+                "scan_failed": bool(issue.error or issue.source == "failed"),
+                "need_accept_scan_risks": not bool(issue.error or issue.source == "failed"),
+                "blocked": issue.item_key,
+                "scan": scan_payload(issue),
+                "message": issue.cli_block_message(),
+            }
+        )
+    by_key = {row.item_key: row for row in scans}
+    results = install_pack(pending, dry_run=bool(args.get("dry_run")), accept_scan_risks=accept, scans=by_key)
+    failed = next((item for item, result in results if not result.ok), None)
+    return _ok(
+        {
+            "ok": failed is None,
+            "id": pack.id,
+            "stopped_at": failed.key if failed else "",
+            "count": len(results),
+        }
+    )
+
+
 def tool_scan(args: dict[str, Any], items: list[Item]) -> dict[str, Any]:
     from omastore.scan import scan_item, scan_payload
 
@@ -414,6 +472,11 @@ _READ_TOOLS = {
         _schema({"id": {"type": "string"}}, ["id"]),
         tool_hidden_widgets,
     ),
+    "outdated": (
+        "List installed extras whose git HEAD is behind upstream.",
+        _schema({}),
+        tool_outdated,
+    ),
     "scan": (
         "Static pre-install scan of one theme or plugin. Fetches a copy, never executes QML or install commands. Fail closed.",
         _schema({"id": {"type": "string"}}, ["id"]),
@@ -437,6 +500,19 @@ _MUTATE_TOOLS = {
             ["id"],
         ),
         tool_install,
+    ),
+    "pack_install": (
+        "Install a suggested pack with official omarchy. Requires confirm=true and a clean scan per member (or accept_scan_risks). Stops on the first blocked plugin.",
+        _schema(
+            {
+                "id": {"type": "string", "description": "pack id, e.g. everyday"},
+                "confirm": {"type": "boolean"},
+                "dry_run": {"type": "boolean"},
+                "accept_scan_risks": {"type": "boolean"},
+            },
+            ["id"],
+        ),
+        tool_pack_install,
     ),
     "remove": (
         "Remove with official omarchy after restoring hiddenEntries. Requires confirm=true.",

@@ -103,11 +103,14 @@ def test_exec_and_hyprctl_block(tmp_path: Path) -> None:
     assert any(finding.category == "process" for finding in result.findings)
 
 
-def test_qml_process_blocks(tmp_path: Path) -> None:
-    root = _write_tree(tmp_path, {"x.qml": "Process { command: \"bash\" }\n"})
+def test_qml_process_and_hyprctl_are_warn(tmp_path: Path) -> None:
+    root = _write_tree(tmp_path, {"x.qml": "Process { command: \"bash\" }\nhyprctl dispatch\n"})
     result = scan_tree(_plugin(), root)
-    assert result.verdict == "block"
-    assert any(finding.why == "QML Process" for finding in result.findings)
+    assert result.verdict == "warn"
+    assert any(finding.why == "QML Process" and finding.severity == "warn" for finding in result.findings)
+    assert any(finding.why == "hyprctl" and finding.severity == "warn" for finding in result.findings)
+    assert result.allows_install(False) is False
+    assert result.allows_install(True) is True
 
 
 def test_secrets_and_obfuscation(tmp_path: Path) -> None:
@@ -385,8 +388,41 @@ def test_scan_items_keeps_going(tmp_path: Path, monkeypatch) -> None:
     assert results[2].verdict == "clean"
 
 
+def test_scan_cache_fresh_and_stale(tmp_path: Path, monkeypatch) -> None:
+    from omastore.scan import (
+        ScanResult,
+        cached_scan_summary,
+        save_scan_cache,
+        scan_cache_fresh,
+    )
+
+    monkeypatch.setattr("omastore.catalog.cache_dir", lambda: tmp_path)
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr("omastore.scan.time.time", lambda: clock["now"])
+    item = _plugin()
+    result = ScanResult(
+        item_key=item.key,
+        item_id=item.id,
+        item_name=item.name,
+        kind=item.kind,
+        repo=item.repo,
+        verdict="clean",
+        source="tree",
+    )
+    save_scan_cache(item, result)
+    assert scan_cache_fresh(item) is True
+    assert cached_scan_summary(item) == "scan: clean"
+    clock["now"] = 1_000.0 + 7 * 60 * 60
+    assert scan_cache_fresh(item) is False
+    assert cached_scan_summary(item) == "scan: stale (clean)"
+    moved = _plugin(repo="https://github.com/b/moved", install_url="https://github.com/b/moved")
+    clock["now"] = 1_000.0
+    assert scan_cache_fresh(moved) is False
+    assert cached_scan_summary(_plugin(id="never")) == "scan: not scanned"
+
+
 def test_verified_is_not_a_skip(tmp_path: Path) -> None:
     root = _write_tree(tmp_path, {"x.qml": "XMLHttpRequest\n"})
     result = scan_tree(_plugin(verification="verified"), root)
-    assert result.verdict == "block"
+    assert result.verdict in {"warn", "block"}
     assert result.allows_install(False) is False
