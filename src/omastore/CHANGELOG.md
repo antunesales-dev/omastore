@@ -6,17 +6,23 @@
 
 Installed groups, scan-on-update, bulk outdated, credits.
 
-- Credits screen shows the version and a changelog tab (`?`, then `l`).
-- Filter and list outdated extras: `f` includes outdated, yellow **↑**, `is:outdated` / `is:updatable`, `omastore list --outdated`.
-- Apply/try uses the `omarchy theme list` name, so catalog titles like Retro '82 actually switch.
-- TUI follows the current theme and installed plugins while open (colors + list, about every 2s) without stealing list focus.
-- Installed tab groups current / extra themes / community plugins / built-in plugins; stock themes stay off the default dump.
-- Catalog age on the status line. Overlay does not mark a catalog listing stock just because the title slug-collides.
-- Updates run the same no-execute scan as install. hyprctl/Process/fetch are warn; curl|bash and secrets stay block. Last scan verdict on the detail pane. MCP `outdated` and `pack_install`.
-- `g` / `by:author` / `--author` lists more from the same catalog author or GitHub owner. Stays on the current tab (`1` / `2` for the other kind).
-- `omastore update --outdated` and Installed/`f outdated` then `u` scan every outdated extra, then update (one `omarchy theme update` for extra git themes; plugins one by one). Stop on the first block.
-- Settling on a row pre-scans into `~/.cache/omastore/scans/` when the last verdict is missing or stale.
-- Pack member names jump to the plugins tab; `g` on a pack lists those plugins.
+**Credits.** `?` shows the version, catalog credits, and a changelog tab (`l`).
+
+**Installed.** Grouped as current theme, extra themes, community plugins, then built-in plugins. Stock palettes stay off the default dump. Yellow **↑** means git HEAD is behind — `f` cycles to outdated, or search `is:outdated` / `is:updatable`. CLI: `omastore list --outdated`. Catalog age sits on the status line. A catalog listing is not marked stock just because the title slug-collides.
+
+**Apply.** Apply and try use the `omarchy theme list` name, so titles like Retro '82 actually switch.
+
+**Live.** While open, the TUI follows the current theme (including colors) and installed plugins, about every 2s, without stealing list focus.
+
+**Scan.** Updates use the same no-execute scan as install. `hyprctl`, QML `Process`, and `fetch` are warn; `curl | bash` and secrets stay block. The detail pane shows the last verdict. Settling on a row pre-scans into `~/.cache/omastore/scans/` when that verdict is missing or stale.
+
+**Update.** `omastore update --outdated` and Installed (or Plugins) with `f` outdated, then `u`, scan every listed extra, then update. Extra git themes share one `omarchy theme update`. Plugins update one by one. Stop on the first block.
+
+**Author.** `g`, `by:author`, and `--author` list more from the same catalog author or GitHub owner, on the current tab. Press `1` / `2` for the other kind.
+
+**Packs.** Click a member name to open it on the plugins tab. `g` on a pack lists those plugins.
+
+**MCP.** Read-only `outdated`. `pack_install` still needs mutate, `confirm=true`, and a clean scan.
 
 ## 0.2.5 — 2026-08-21
 
