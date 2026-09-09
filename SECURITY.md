@@ -29,11 +29,40 @@ the first blocked plugin.
 MCP `install` needs `confirm=true` **and** a clean scan (or
 `accept_scan_risks`). A crashed scan cannot be overridden.
 
+## What counts as a security issue
+
+Report privately if the problem is in **this client**, for example:
+
+- Code execution, command injection, or path traversal in omastore
+- Secrets, tokens, or credentials leaked or stored unsafely
+- Skipping the pre-install scan or its fail-closed behavior without
+  an explicit user override
+- MCP install/remove running without the intended confirmations
+- Privilege issues in how omastore shells out to `omarchy`
+
+A **normal bug** (TUI glitch, wrong filter, cache, docs) is not a
+vulnerability. File a public GitHub Issue.
+
+A malicious or compromised *theme or plugin* is not an omastore
+vulnerability. See “Report a bad catalog listing” below.
+
 ## Report a vulnerability in omastore
 
-Do not open a public issue for a vulnerability in this repository.
-Use [GitHub private vulnerability reporting](https://github.com/antunesales-dev/omastore/security/advisories/new)
-or email the maintainer.
+Do **not** open a public issue or pull request.
+
+Use [GitHub Security Advisories](https://github.com/antunesales-dev/omastore/security/advisories/new)
+so the report stays private until a fix is ready.
+
+Please do **not** put secrets, private tokens, credentials, or a full
+weaponized exploit PoC in public Issues, PRs, discussions, or chat.
+Describe the impact and enough to reproduce; we can ask for more
+over the advisory.
+
+### What to expect
+
+- We aim to acknowledge within a few days.
+- We will fix and publish when a patch is ready, then disclose.
+- Please give us time to ship a fix before talking about it in public.
 
 ## Report a bad catalog listing
 

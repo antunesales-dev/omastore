@@ -1,0 +1,61 @@
+name: Bug report
+description: Something broke in the omastore CLI, TUI, or MCP client
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for product bugs. Public issues are visible to everyone.
+
+        If this is a **vulnerability in omastore**, do not continue. Close this form and report privately via [GitHub Security Advisories](https://github.com/antunesales-dev/omastore/security/advisories/new) — see [SECURITY.md](https://github.com/antunesales-dev/omastore/blob/main/SECURITY.md).
+
+        A malicious theme or plugin listing belongs with that project / catalog, not here.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Before you paste
+      description: Required. We will close reports that dump secrets or look like a public vulnerability disclosure.
+      options:
+        - label: This is not a security vulnerability in omastore (those go in GitHub Security Advisories, not public Issues).
+          required: true
+        - label: I have not pasted API keys, tokens, passwords, private URLs, or personal data.
+          required: true
+        - label: I am not including a full weaponized exploit PoC.
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: version
+    attributes:
+      label: Version / environment
+      description: omastore version (`omastore about`), Omarchy version if relevant, terminal (Foot, Ghostty, …).
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Paste relevant terminal output. Redact secrets first.
+      render: shell
+    validations:
+      required: false

@@ -186,6 +186,12 @@ omarchy plugin add <url> --enable --yes
 
 Review the repository before you confirm. The first launch shows this once; `[y]` continues, `[e]` opens the Everyday pack.
 
+## Reporting issues
+
+Product bugs and feature ideas: [GitHub Issues](https://github.com/antunesales-dev/omastore/issues). Do not paste secrets, tokens, or personal data.
+
+A vulnerability in omastore itself: report privately — [SECURITY.md](SECURITY.md). Do not open a public issue or PR.
+
 ## Develop
 
 PRs only — `main` does not take direct pushes. See [CONTRIBUTING.md](CONTRIBUTING.md).

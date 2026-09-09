@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/antunesales-dev/omastore/security/advisories/new
+    about: Private GitHub Security Advisories only. Do not open a public issue or PR.
+  - name: Security policy
+    url: https://github.com/antunesales-dev/omastore/blob/main/SECURITY.md
+    about: What to report here vs a catalog listing, and how disclosure works.
