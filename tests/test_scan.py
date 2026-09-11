@@ -225,8 +225,13 @@ def test_archive_fetch_scans_without_clone(monkeypatch, tmp_path: Path) -> None:
         assert "github.com/a/demo/archive" in url
         return archive
 
+    from omastore.scan import audit_tree
+
     monkeypatch.setattr("omastore.scan.fetch_bytes", fake_fetch)
     monkeypatch.setattr("omastore.scan.shallow_clone", lambda *a, **k: clones.append("clone"))
+    # bwrap may be absent on CI; audit in-process for a deterministic clean verdict
+    # on a clean tree (the sandbox fallback adds a warn finding).
+    monkeypatch.setattr("omastore.scan.sandboxed_audit_tree", lambda root: audit_tree(root))
     result = scan_item(_plugin())
     assert clones == []
     assert result.source == "archive"
