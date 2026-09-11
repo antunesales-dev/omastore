@@ -207,6 +207,7 @@ def test_preview_binding_exists() -> None:
     from omastore.app import OmaStoreApp, ShotScreen
 
     assert any(binding.key == "p" and binding.action == "open_preview" for binding in OmaStoreApp.BINDINGS)
+    assert any(binding.key == "m" and binding.action == "cycle_maintained" for binding in OmaStoreApp.BINDINGS)
     shot_keys = ",".join(binding.key for binding in ShotScreen.BINDINGS)
     assert "p" not in shot_keys.split(",")
     assert any(binding.action == "open_file" and "o" in binding.key.split(",") for binding in ShotScreen.BINDINGS)
@@ -306,15 +307,23 @@ def test_filter_bar_is_readable() -> None:
     plugins = filter_bar(Query(), "plugins")
     assert "f all" in plugins
     assert "y all" in plugins
+    assert "m active" in plugins
     assert "0 reset" in plugins
     active = filter_bar(
         Query(status="not-installed", source="community", verified="yes", sort="name"),
         "plugins",
     )
-    assert active == "f not-installed   v community   y verified   s sort:name   0 reset"
+    assert active == "f not-installed   v community   y verified   m active   s sort:name   0 reset"
     assert "f outdated" in filter_bar(Query(status="outdated"), "plugins")
     assert "limehawk" not in filter_bar(Query())
     assert "HANCORE" not in filter_bar(Query(), "plugins")
+    assert "m inactive" in filter_bar(Query(maintained="inactive"), "plugins")
+
+
+def test_status_line_notes_inactive_hidden() -> None:
+    line = format_status("1503 plugins", 812, inactive_hidden=691)
+    assert "812 shown" in line
+    assert "691 inactive hidden" in line
 
 
 def test_status_line_skips_credits_and_stays_short() -> None:
@@ -527,6 +536,80 @@ def test_act_install_scans_first() -> None:
     assert len(pushed) == 1
     assert isinstance(pushed[0], ScanScreen)
     assert ran == []
+
+
+def test_scan_warn_confirms_instead_of_findings_abort() -> None:
+    from omastore.app import ConfirmScreen, FindingsScreen, OmaStoreApp
+    from omastore.scan import Finding, ScanResult
+
+    pushed: list[object] = []
+    callbacks: list[object] = []
+
+    def push(screen, callback=None):
+        pushed.append(screen)
+        callbacks.append(callback)
+
+    app = OmaStoreApp()
+    app.push_screen = push  # type: ignore[method-assign]
+    item = Item(
+        kind="plugin",
+        id="x",
+        name="X",
+        install_url="https://github.com/a/x",
+        repo="https://github.com/a/x",
+    )
+    app._scan_then_install(item)
+    warn = ScanResult(
+        item_key="plugin:x",
+        item_id="x",
+        item_name="X",
+        kind="plugin",
+        repo=item.repo,
+        verdict="warn",
+        findings=[Finding("warn", "network", "main.qml", 1, "fetch(")],
+        source="tree",
+    )
+    callbacks[0]([warn])
+    assert isinstance(pushed[1], ConfirmScreen)
+    assert "scan warn" in pushed[1].prompt
+    assert "fetch(" in pushed[1].prompt
+    assert not any(isinstance(screen, FindingsScreen) for screen in pushed)
+
+
+def test_scan_block_still_opens_findings() -> None:
+    from omastore.app import ConfirmScreen, FindingsScreen, OmaStoreApp
+    from omastore.scan import Finding, ScanResult
+
+    pushed: list[object] = []
+    callbacks: list[object] = []
+
+    def push(screen, callback=None):
+        pushed.append(screen)
+        callbacks.append(callback)
+
+    app = OmaStoreApp()
+    app.push_screen = push  # type: ignore[method-assign]
+    item = Item(
+        kind="plugin",
+        id="x",
+        name="X",
+        install_url="https://github.com/a/x",
+        repo="https://github.com/a/x",
+    )
+    app._scan_then_install(item)
+    blocked = ScanResult(
+        item_key="plugin:x",
+        item_id="x",
+        item_name="X",
+        kind="plugin",
+        repo=item.repo,
+        verdict="block",
+        findings=[Finding("block", "process", "README.md", 1, "curl | bash")],
+        source="tree",
+    )
+    callbacks[0]([blocked])
+    assert isinstance(pushed[1], FindingsScreen)
+    assert not any(isinstance(screen, ConfirmScreen) for screen in pushed[1:])
 
 
 def test_findings_screen_abort_is_default() -> None:

@@ -2,10 +2,12 @@ from omastore.filters import (
     Query,
     apply_query,
     clamp_query,
+    cycle_maintained,
     cycle_status,
     cycle_verified,
     matches_filters,
     parse_search,
+    plugin_inactive,
     reset_filters,
     strip_filter_tokens,
 )
@@ -267,3 +269,44 @@ def test_plugins_sort_stars_among_uninstalled() -> None:
     ]
     shown = apply_query(items, Query(sort="stars"), "plugins")
     assert [item.name for item in shown] == ["High", "Mid", "Low", "On"]
+
+
+def test_inactive_plugins_hidden_by_default() -> None:
+    old = Item(
+        kind="plugin",
+        id="old",
+        name="Old",
+        repo_updated_at="2026-01-01T00:00:00Z",
+        stars=99,
+    )
+    fresh = Item(
+        kind="plugin",
+        id="fresh",
+        name="Fresh",
+        repo_updated_at="2026-08-20T00:00:00Z",
+        stars=1,
+    )
+    have = Item(
+        kind="plugin",
+        id="have",
+        name="Have",
+        installed=True,
+        repo_updated_at="2026-01-01T00:00:00Z",
+        stars=2,
+    )
+    assert plugin_inactive(old) is True
+    assert plugin_inactive(fresh) is False
+    assert plugin_inactive(have) is False
+    shown = apply_query([old, fresh, have], Query(), "plugins")
+    assert [item.id for item in shown] == ["have", "fresh"]
+    stale = apply_query([old, fresh, have], Query(maintained="inactive"), "plugins")
+    assert [item.id for item in stale] == ["old"]
+    everything = apply_query([old, fresh, have], Query(maintained="all"), "plugins")
+    assert {item.id for item in everything} == {"old", "fresh", "have"}
+    assert parse_search("is:inactive").maintained == "inactive"
+    assert parse_search("is:stale").maintained == "inactive"
+    assert parse_search("maintained:all").maintained == "all"
+    assert cycle_maintained(Query()).maintained == "inactive"
+    theme = Item(kind="theme", id="void", name="Void", repo_updated_at="2020-01-01T00:00:00Z")
+    assert plugin_inactive(theme) is False
+    assert apply_query([theme], Query(), "themes") == [theme]

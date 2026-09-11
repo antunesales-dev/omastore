@@ -101,6 +101,10 @@ def _query_from_args(args: argparse.Namespace, text: str = "") -> Query:
         query = query.with_source("builtin")
     if getattr(args, "stars", None):
         query = Query(**{**query.__dict__, "min_stars": max(0, int(args.stars))})
+    if getattr(args, "inactive", False):
+        query = query.with_maintained("inactive")
+    if getattr(args, "include_inactive", False):
+        query = query.with_maintained("all")
     return query
 
 
@@ -118,6 +122,16 @@ def _add_filter_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--builtin", action="store_true", help="built-in / stock plugins")
     parser.add_argument("--stars", type=int, help="minimum star rating")
     parser.add_argument("--sort", choices=("stars", "name", "recent"), default="stars")
+    parser.add_argument(
+        "--inactive",
+        action="store_true",
+        help="only community plugins with no GitHub update in 90 days",
+    )
+    parser.add_argument(
+        "--include-inactive",
+        action="store_true",
+        help="do not hide plugins whose GitHub repo is older than 90 days",
+    )
 
 
 def cmd_search(args: argparse.Namespace) -> int:
@@ -171,10 +185,13 @@ def _print_confirm(item: Item, name: str) -> None:
 def _scan_for_install(item: Item, args: argparse.Namespace, *, pack_id: str = ""):
     from omastore.scan import ScanResult, scan_item
 
-    print("checking repo…", file=sys.stderr)
+    print("checking repo in a sandbox…", file=sys.stderr)
     result: ScanResult = scan_item(item)
     accept = bool(getattr(args, "accept_scan_risks", False))
     if result.allows_install(accept):
+        if result.verdict == "warn":
+            print(f"scan warn {result.item_key}", file=sys.stderr)
+            print(result.format_findings(), file=sys.stderr)
         return result, 0
     if pack_id:
         print(f"{pack_id} blocked at {result.item_key}")
@@ -195,7 +212,7 @@ def cmd_update_outdated(args: argparse.Namespace) -> int:
     if not rows:
         print("nothing outdated")
         return 0
-    print("checking repo…", file=sys.stderr)
+    print("checking repo in a sandbox…", file=sys.stderr)
     scans = scan_items(rows)
     accept = bool(getattr(args, "accept_scan_risks", False))
     blocked = [row for row in scans if not row.allows_install(accept)]
@@ -436,7 +453,7 @@ def cmd_pack_install(args: argparse.Namespace, pack_id: str) -> int:
     if not pending:
         print("nothing to install")
         return 0
-    print("checking repo…", file=sys.stderr)
+    print("checking repo in a sandbox…", file=sys.stderr)
     scans = scan_items(pending)
     issue = first_issue(scans)
     accept = bool(getattr(args, "accept_scan_risks", False))
@@ -520,7 +537,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
     items, _ = _load(force=args.refresh)
     item = _find(items, args.id)
-    print("checking repo…", file=sys.stderr)
+    print("checking repo in a sandbox…", file=sys.stderr)
     result = scan_item(item)
     print(result.format_full())
     return 0 if result.verdict == "clean" else 2

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timezone
 
 from omastore.models import Item, Tab
 
@@ -11,6 +11,8 @@ INSTALLED_STATUS_CYCLE = ("all", "extra", "outdated")
 SOURCE_CYCLE = ("all", "community", "builtin")
 VERIFIED_CYCLE = ("all", "yes", "no")
 SORT_CYCLE = ("stars", "name", "recent")
+MAINTAINED_CYCLE = ("active", "inactive", "all")
+INACTIVE_AFTER_DAYS = 90
 PREFIXES = {
     "is": "status",
     "src": "source",
@@ -26,6 +28,7 @@ PREFIXES = {
     "by": "author",
     "author": "author",
     "pack": "pack",
+    "maintained": "maintained",
 }
 
 
@@ -43,6 +46,7 @@ class Query:
     min_stars: int = 0
     author: str = ""
     pack: str = ""
+    maintained: str = "active"
 
     def with_status(self, status: str) -> Query:
         return replace(self, status=status)
@@ -58,6 +62,9 @@ class Query:
 
     def with_author(self, author: str) -> Query:
         return replace(self, author=(author or "").strip().lower())
+
+    def with_maintained(self, maintained: str) -> Query:
+        return replace(self, maintained=(maintained or "active").strip().lower())
 
     def label(self) -> str:
         parts = [f"is:{self.status}"]
@@ -75,6 +82,10 @@ class Query:
             parts.append(f"by:{self.author}")
         if self.pack:
             parts.append(f"pack:{self.pack}")
+        if self.maintained not in {"", "all", "active"}:
+            parts.append(f"is:{self.maintained}")
+        elif self.maintained == "all":
+            parts.append("maintained:all")
         if self.min_stars:
             parts.append(f"stars:{self.min_stars}")
         parts.append(f"sort:{self.sort}")
@@ -114,6 +125,11 @@ def cycle_verified(query: Query) -> Query:
 
 def cycle_sort(query: Query) -> Query:
     return query.with_sort(_next(SORT_CYCLE, query.sort))
+
+
+def cycle_maintained(query: Query) -> Query:
+    current = query.maintained if query.maintained in MAINTAINED_CYCLE else "active"
+    return query.with_maintained(_next(MAINTAINED_CYCLE, current))
 
 
 def clamp_query(query: Query, tab: Tab) -> Query:
@@ -156,7 +172,14 @@ def parse_search(raw: str, *, defaults: Query | None = None) -> Query:
             continue
         value = value.lower()
         if field == "status":
-            query = replace(query, status=value)
+            if value in {"active", "inactive", "stale"}:
+                query = replace(query, maintained="inactive" if value == "stale" else value)
+            elif value in {"all-plugins", "everything"}:
+                query = replace(query, maintained="all")
+            else:
+                query = replace(query, status=value)
+        elif field == "maintained":
+            query = replace(query, maintained="inactive" if value == "stale" else value)
         elif field == "source":
             query = replace(query, source=value)
         elif field == "hue":
@@ -191,6 +214,23 @@ def _source_of(item: Item) -> str:
 
 def _verified(item: Item) -> bool:
     return item.verification.lower() in {"verified", "passed"}
+
+
+def plugin_inactive(item: Item, *, now: float | None = None) -> bool:
+    """True when a community plugin has no GitHub update in 90 days.
+
+    Installed extras stay visible. Missing repositoryUpdatedAt counts as inactive.
+    Themes and built-in plugins are never inactive.
+    """
+    if item.kind != "plugin":
+        return False
+    if item.builtin or item.first_party or item.installed:
+        return False
+    stamp = _stamp(item.repo_updated_at)
+    if stamp <= 0:
+        return False
+    current = datetime.now(timezone.utc).timestamp() if now is None else now
+    return current - stamp >= INACTIVE_AFTER_DAYS * 86400
 
 
 def _fold_author(value: str) -> str:
@@ -247,6 +287,11 @@ def matches_filters(item: Item, query: Query) -> bool:
     if query.min_stars and (item.stars or 0) < query.min_stars:
         return False
     if query.author and _fold_author(query.author) not in item_author_haystack(item):
+        return False
+    maintained = query.maintained if query.maintained not in {"", "all"} else "all"
+    if maintained == "active" and plugin_inactive(item):
+        return False
+    if maintained in {"inactive", "stale"} and not plugin_inactive(item):
         return False
     if query.pack:
         from omastore.packs import get_pack

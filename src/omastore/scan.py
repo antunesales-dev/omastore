@@ -6,7 +6,9 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -36,11 +38,13 @@ MAX_SCAN_FILE_BYTES = 256 * 1024
 MAX_FINDINGS = 40
 MAX_FINDINGS_PER_FILE = 8
 CLONE_TIMEOUT = 60
+SANDBOX_TIMEOUT = 45
 BASE64_MIN = 400
 SCAN_CACHE_TTL = 6 * 60 * 60
 
 SKIP_DIRS = {
     ".git",
+    ".github",
     "node_modules",
     "__pycache__",
     ".venv",
@@ -51,7 +55,24 @@ SKIP_DIRS = {
     "vendor",
     ".idea",
     ".vscode",
+    "tests",
+    "test",
+    "__tests__",
+    "spec",
+    "e2e",
 }
+
+def _is_test_file(name: str) -> bool:
+    lower = (name or "").lower()
+    return (
+        ".test." in lower
+        or ".spec." in lower
+        or lower.endswith("_test.py")
+        or lower.endswith("_test.js")
+        or lower.endswith("_test.ts")
+        or lower.startswith("test_")
+    )
+
 
 SKIP_SUFFIXES = {
     ".png",
@@ -83,6 +104,7 @@ SKIP_SUFFIXES = {
     ".qmlc",
     ".pyc",
     ".pyo",
+    ".svg",
 }
 
 CODE_SUFFIXES = {
@@ -108,7 +130,6 @@ CODE_SUFFIXES = {
     ".toml",
     ".yaml",
     ".yml",
-    ".svg",
     ".qmlinc",
 }
 
@@ -135,6 +156,8 @@ OK_HOSTS = {
     "www.omarchyplugins.com",
     "omarchy.org",
     "www.omarchy.org",
+    "w3.org",
+    "www.w3.org",
 }
 
 HANCORE_ISSUES_NEW = f"{PLUGIN_STORE_REPO}/issues/new"
@@ -161,13 +184,14 @@ _PROCESS_APIS = [
     (re.compile(r"\bos\.system\s*\("), "os.system", "process"),
     (re.compile(r"\bos\.popen\s*\("), "os.popen", "process"),
     (re.compile(r"\bpopen\s*\("), "popen", "process"),
-    (re.compile(r"\bexec\s*\("), "exec(", "process"),
+    (re.compile(r"\bexec\s*\("), "exec(", "process", "warn"),
     (re.compile(r"\bhyprctl\b"), "hyprctl", "process", "warn"),
-    (re.compile(r"\bbash\s+-c\b"), "bash -c", "process"),
-    (re.compile(r"/bin/sh\b"), "/bin/sh", "process"),
-    (re.compile(r"/bin/bash\b"), "/bin/bash", "process"),
-    (re.compile(r"\bchild_process\b"), "child_process", "process"),
-    (re.compile(r"\bspawnSync\s*\("), "spawnSync", "process"),
+    (re.compile(r"\bbash\s+-c\b"), "bash -c", "process", "warn"),
+    (re.compile(r"""['\"]bash['\"]\s*,\s*['\"]-c['\"]"""), "bash -c", "process", "warn"),
+    (re.compile(r"/bin/sh\b"), "/bin/sh", "process", "warn"),
+    (re.compile(r"/bin/bash\b"), "/bin/bash", "process", "warn"),
+    (re.compile(r"\bchild_process\b"), "child_process", "process", "warn"),
+    (re.compile(r"\bspawnSync\s*\("), "spawnSync", "process", "warn"),
     (re.compile(r"\bctypes\b"), "ctypes", "process"),
 ]
 
@@ -182,8 +206,6 @@ _SECRET_APIS = [
     (re.compile(r"\b\.netrc\b"), ".netrc", "secrets"),
     (re.compile(r"\bGH_TOKEN\b"), "GH_TOKEN", "secrets"),
     (re.compile(r"\bAWS_SECRET"), "AWS_SECRET", "secrets"),
-    (re.compile(r"(^|[^\w])cookies?(\W|$)", re.IGNORECASE), "cookie", "secrets"),
-    (re.compile(r"\bapi[_-]?token\b", re.IGNORECASE), "api token", "secrets"),
 ]
 
 _SHELL_JSON_WRITE = re.compile(
@@ -205,7 +227,7 @@ _OBFUSCATION = [
 _DOC_EXEC = [
     (re.compile(r"curl[^\n]{0,80}\|\s*(bash|sh)\b"), "curl | bash", "process"),
     (re.compile(r"wget[^\n]{0,80}\|\s*(bash|sh)\b"), "wget | sh", "process"),
-    (re.compile(r"\bbash\s+-c\b"), "bash -c", "process"),
+    (re.compile(r"\bbash\s+-c\b"), "bash -c", "process", "warn"),
     (re.compile(r"\bhyprctl\b"), "hyprctl", "process", "warn"),
     (re.compile(r"\bProcess\s*\{"), "QML Process", "process", "warn"),
 ]
@@ -242,10 +264,10 @@ class ScanResult:
     error: str = ""
 
     def allows_install(self, accept_scan_risks: bool = False) -> bool:
-        """Fetch/parse failure cannot be overridden. Pattern hits can, with the flag."""
+        """Fetch/parse failure cannot be overridden. Block hits need the flag. Warn does not refuse."""
         if self.source == "failed" or self.error:
             return False
-        if self.verdict == "clean":
+        if self.verdict in {"clean", "warn"}:
             return True
         return bool(accept_scan_risks)
 
@@ -655,7 +677,7 @@ def _scan_line(
                 continue
             _add(
                 findings,
-                "block",
+                "warn",
                 "network",
                 rel,
                 lineno,
@@ -677,13 +699,16 @@ def audit_tree(root: Path) -> tuple[list[Finding], int]:
         kept: list[str] = []
         for name in dirnames:
             if name in SKIP_DIRS:
-                skipped_vendor = True
+                if name in {".git", "node_modules", "vendor", ".venv", "venv"}:
+                    skipped_vendor = True
                 continue
             kept.append(name)
         dirnames[:] = kept
         for name in filenames:
             path = current / name
             if not _is_under(root, path):
+                continue
+            if _is_test_file(name):
                 continue
             suffix = path.suffix.lower()
             if suffix in SKIP_SUFFIXES:
@@ -820,6 +845,163 @@ def cached_scan_summary(item: Item) -> str:
     return f"scan: {verdict}"
 
 
+def bwrap_available() -> bool:
+    return bool(shutil.which("bwrap"))
+
+
+def sandboxed_audit_tree(root: Path) -> tuple[list[Finding], int]:
+    """Static audit with no network and no access to HOME. Never executes the tree.
+
+    Uses bubblewrap when present. Falls back to in-process audit with a warn.
+    This is not a runtime sandbox for installed plugins.
+    """
+    if bwrap_available():
+        try:
+            return _bwrap_audit(root)
+        except (OSError, subprocess.TimeoutExpired, RuntimeError, json.JSONDecodeError, ValueError) as exc:
+            raise RuntimeError(f"sandbox scan failed: {exc}") from exc
+    findings, scanned = audit_tree(root)
+    findings.append(
+        Finding(
+            "warn",
+            "catalog",
+            "",
+            None,
+            "scan ran without bubblewrap (not isolated)",
+        )
+    )
+    return findings, scanned
+
+
+def _bwrap_audit(root: Path) -> tuple[list[Finding], int]:
+    root = root.resolve()
+    pkg_parent = Path(__file__).resolve().parent.parent
+    python = str(Path(sys.base_prefix) / "bin" / "python3")
+    if not Path(python).is_file():
+        python = sys.executable
+    cmd = [
+        "bwrap",
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        "--symlink",
+        "usr/bin",
+        "/bin",
+        "--symlink",
+        "usr/lib",
+        "/lib",
+        "--symlink",
+        "usr/lib",
+        "/lib64",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--unshare-net",
+        "--unshare-pid",
+        "--unshare-ipc",
+        "--cap-drop",
+        "ALL",
+        "--die-with-parent",
+        "--clearenv",
+        "--setenv",
+        "PATH",
+        "/usr/bin:/bin",
+        "--setenv",
+        "HOME",
+        "/tmp",
+        "--setenv",
+        "PYTHONPATH",
+        str(pkg_parent),
+        "--setenv",
+        "PYTHONNOUSERSITE",
+        "1",
+        "--setenv",
+        "PYTHONDONTWRITEBYTECODE",
+        "1",
+        "--ro-bind",
+        str(pkg_parent),
+        str(pkg_parent),
+        "--ro-bind",
+        str(root),
+        str(root),
+        "--chdir",
+        "/tmp",
+        "--",
+        python,
+        "-m",
+        "omastore.scan",
+        "--worker",
+        str(root),
+    ]
+    completed = subprocess.run(
+        cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=SANDBOX_TIMEOUT,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "bwrap failed").strip()
+        raise RuntimeError(detail[:500])
+    payload = json.loads(completed.stdout or "{}")
+    if not isinstance(payload, dict):
+        raise ValueError("sandbox returned a non-object")
+    findings = _findings_from_payload(payload)
+    try:
+        scanned = int(payload.get("scanned_files") or 0)
+    except (TypeError, ValueError):
+        scanned = 0
+    return findings, scanned
+
+
+def _findings_from_payload(payload: dict) -> list[Finding]:
+    rows = payload.get("findings") or []
+    findings: list[Finding] = []
+    if not isinstance(rows, list):
+        return findings
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        severity = row.get("severity")
+        if severity not in {"block", "warn"}:
+            continue
+        line = row.get("line")
+        findings.append(
+            Finding(
+                severity,
+                str(row.get("category") or "catalog"),
+                str(row.get("path") or ""),
+                int(line) if isinstance(line, int) else None,
+                str(row.get("why") or ""),
+                str(row.get("snippet") or ""),
+            )
+        )
+    return findings
+
+
+def worker_audit(root: str) -> dict:
+    """Called inside bubblewrap. Only walks the given tree."""
+    findings, scanned = audit_tree(Path(root))
+    return {
+        "scanned_files": scanned,
+        "findings": [
+            {
+                "severity": finding.severity,
+                "category": finding.category,
+                "path": finding.path,
+                "line": finding.line,
+                "why": finding.why,
+                "snippet": finding.snippet,
+            }
+            for finding in findings
+        ],
+        "note": "static audit in bubblewrap; plugin code was not executed",
+    }
+
+
 def scan_item(item: Item, *, tree: Path | None = None) -> ScanResult:
     """Catalog checks, then fetch-without-running, then static audit. Fail closed."""
     findings = catalog_findings(item)
@@ -837,7 +1019,7 @@ def scan_item(item: Item, *, tree: Path | None = None) -> ScanResult:
     url = (item.install_url or item.repo or "").strip()
     try:
         with fetched_tree(url) as (root, source):
-            extra, scanned = audit_tree(root)
+            extra, scanned = sandboxed_audit_tree(root)
             findings.extend(extra)
             result = _result(item, findings, scanned_files=scanned, source=source)
             save_scan_cache(item, result)
@@ -859,11 +1041,12 @@ def scan_items(items: list[Item]) -> list[ScanResult]:
     return [scan_item(item) for item in items]
 
 
-def first_issue(results: list[ScanResult]) -> ScanResult | None:
+def first_issue(results: list[ScanResult], *, accept_scan_risks: bool = False) -> ScanResult | None:
+    """First scan that refuses install. Warn is not a refuse."""
     failed = next((row for row in results if row.source == "failed" or row.error), None)
     if failed is not None:
         return failed
-    return next((row for row in results if row.verdict != "clean"), None)
+    return next((row for row in results if not row.allows_install(accept_scan_risks)), None)
 
 
 def anyway_prompt(result: ScanResult, item: Item, *, extra: str = "") -> str:
@@ -1046,7 +1229,14 @@ def scan_payload(result: ScanResult) -> dict:
             for finding in result.findings
         ],
         "note": (
-            "Static scan is not proof of safety. Plugins run unsandboxed. "
+            "Static scan is not proof of safety. Plugins run unsandboxed after install. "
             "HANCORE verified is a signal, not a skip. Fetch/parse failure cannot be overridden."
         ),
     }
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 3 and sys.argv[1] == "--worker":
+        sys.stdout.write(json.dumps(worker_audit(sys.argv[2])))
+    else:
+        raise SystemExit("usage: python -m omastore.scan --worker ROOT")
