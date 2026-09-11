@@ -53,7 +53,21 @@ def _dirty_scan(item: Item | None = None, *, failed: bool = False) -> ScanResult
         kind=target.kind,
         repo=target.repo or "",
         verdict="block",
-        findings=[Finding("block", "network", "main.qml", 4, "fetch(")],
+        findings=[Finding("block", "network", "main.qml", 4, "curl | bash")],
+        source="tree",
+    )
+
+
+def _warn_scan(item: Item | None = None) -> ScanResult:
+    target = item or _item()
+    return ScanResult(
+        item_key=target.key,
+        item_id=target.id,
+        item_name=target.name,
+        kind=target.kind,
+        repo=target.repo or target.install_url or "",
+        verdict="warn",
+        findings=[Finding("warn", "network", "main.qml", 4, "fetch(")],
         source="tree",
     )
 
@@ -87,6 +101,16 @@ def test_search_author_flag_parses() -> None:
     query = _query_from_args(args)
     assert query.author == "oldjobobo"
     assert query.kind == "theme"
+
+
+def test_list_inactive_flag_parses() -> None:
+    args = build_parser().parse_args(["list", "--inactive", "--kind", "plugin"])
+    from omastore.cli import _query_from_args
+
+    query = _query_from_args(args)
+    assert query.maintained == "inactive"
+    query_all = _query_from_args(build_parser().parse_args(["search", "--include-inactive"]))
+    assert query_all.maintained == "all"
 
 
 def test_list_outdated_flag_parses() -> None:
@@ -277,7 +301,7 @@ def test_install_yes_alone_does_not_skip_failed_scan(monkeypatch, capsys) -> Non
     assert args.func(args) == 2
     assert called == []
     out = capsys.readouterr().out
-    assert "fetch(" in out
+    assert "curl | bash" in out
     assert "--i-accept-scan-risks" in out
     assert "pass --yes to proceed" not in out
 
@@ -315,6 +339,26 @@ def test_install_yes_and_accept_scan_risks_proceeds(monkeypatch, capsys) -> None
     args = build_parser().parse_args(["--yes", "--i-accept-scan-risks", "install", "plugin:foo"])
     assert args.accept_scan_risks is True
     assert args.func(args) == 0
+
+
+def test_install_yes_proceeds_on_warn_without_accept_flag(monkeypatch, capsys) -> None:
+    item = _item(
+        id="foo",
+        name="Foo",
+        install_url="https://github.com/example/foo",
+        repo="https://github.com/example/foo",
+    )
+    called: list[object] = []
+    monkeypatch.setattr("omastore.scan.scan_item", lambda _item, **_k: _warn_scan(item))
+    monkeypatch.setattr("omastore.cli._load", lambda force=False: ([item], object()))
+    monkeypatch.setattr("omastore.cli._find", lambda items, token: item)
+    monkeypatch.setattr("omastore.cli.install", lambda *a, **k: called.append(item) or _Result(message="installed"))
+    args = build_parser().parse_args(["--yes", "install", "plugin:foo"])
+    assert args.func(args) == 0
+    assert called == [item]
+    err = capsys.readouterr().err
+    assert "scan warn" in err
+    assert "fetch(" in err
     assert called == [item]
 
 
@@ -453,7 +497,7 @@ def test_pack_install_stops_on_first_blocked_member(monkeypatch, capsys) -> None
     assert called == []
     out = capsys.readouterr().out
     assert "finance blocked at plugin:io.github.5d0tal1gat0r.stocks" in out
-    assert "fetch(" in out
+    assert "curl | bash" in out
     assert "--i-accept-scan-risks" in out
 
 
@@ -532,7 +576,7 @@ def test_cmd_scan_prints_verdict(monkeypatch, capsys) -> None:
     assert args.func(args) == 2
     out = capsys.readouterr().out
     assert "verdict" in out or "block" in out
-    assert "fetch(" in out
+    assert "curl | bash" in out
 
 
 def test_pack_install_unknown_pack(capsys) -> None:

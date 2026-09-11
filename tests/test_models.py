@@ -52,10 +52,12 @@ def test_parse_plugin_installable() -> None:
             "tags": ["workspaces", "hyprland"],
             "stars": 7,
             "verificationStatus": "unverified",
+            "repositoryUpdatedAt": "2026-08-20T01:14:35Z",
         }
     )
     assert item.kind == "plugin"
     assert item.install_url.endswith("omarchy-overview")
+    assert item.repo_updated_at == "2026-08-20T01:14:35Z"
     assert item.matches("workspace overview")
     assert not item.first_party
     assert item.verification_label == "unverified"

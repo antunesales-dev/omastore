@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.2.8 — 2026-09-11
+
+Sandboxed scans, warn does not refuse install, and hide inactive community plugins.
+
+**Sandboxed scan.** The pre-install audit runs in bubblewrap (no network, no HOME, no extra capabilities) after the GitHub fetch. Plugin code is still never executed; this is not a runtime sandbox for installed plugins. The scan skips `tests/`, `spec/`, `e2e/`, `*.test.js`, `*.spec.*`, and `test_*.py`, plus `.github/` and `.svg`.
+
+**Warn does not refuse install.** Scan **warn** (network `fetch`, QML `Process`, `hyprctl`, `bash -c`, `/bin/bash`, `child_process`, unknown https hosts) goes to the normal confirm; `--yes` is enough. Not an abort-default trap. **Block** stays refuse: `curl | bash`, secrets (`~/.ssh`, tokens, shadow), obfuscation, crashed fetch. `--i-accept-scan-risks` still cannot override a failed scan. Generic `cookie` / `api token` word hits are no longer blocks.
+
+**Hide inactive plugins.** Plugins with no GitHub update in 90 days (`repositoryUpdatedAt`) are hidden on the plugins tab by default. Installed extras stay visible. This is a client filter, not a HANCORE delist. `m` cycles active / inactive / all. Search `is:inactive` / `is:active` / `maintained:all`. CLI: `--inactive` / `--include-inactive`. None of today's contest listings are 90 days old yet; the default still shows the current dump.
 
 ## 0.2.6 — 2026-08-22
 

@@ -70,6 +70,7 @@ class Item:
     curated: bool = False
     source_type: str = ""
     listed_at: str = ""
+    repo_updated_at: str = ""  # GitHub repo updatedAt from HANCORE, not listing date
     # local overlay
     installed: bool = False
     enabled: bool = False
@@ -243,4 +244,5 @@ def parse_plugin(raw: dict[str, Any]) -> Item:
         first_party=builtin,
         source_type=source,
         listed_at=str(raw.get("listedAt") or raw.get("addedAt") or ""),
+        repo_updated_at=str(raw.get("repositoryUpdatedAt") or raw.get("repoUpdatedAt") or ""),
     )
