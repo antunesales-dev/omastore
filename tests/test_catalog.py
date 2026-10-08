@@ -17,6 +17,39 @@ def test_catalog_cache_age_label(tmp_path, monkeypatch) -> None:
     assert catalog_cache_age_label(now=now) == "5h old · r refresh"
 
 
+def test_fetch_json_uses_catalog_byte_cap(monkeypatch) -> None:
+    from omastore import catalog as catalog_mod
+
+    seen: dict[str, int] = {}
+
+    def fake_fetch(url: str, *, timeout: float, limit: int) -> bytes:
+        seen["limit"] = limit
+        return b'{"plugins":[]}'
+
+    monkeypatch.setattr("omastore.safety.fetch_bytes", fake_fetch)
+    assert catalog_mod.fetch_json("https://raw.githubusercontent.com/x/y/main/c.json") == {"plugins": []}
+    assert seen["limit"] == catalog_mod.CATALOG_MAX_BYTES
+    assert catalog_mod.CATALOG_MAX_BYTES > 13 * 1024 * 1024
+
+
+def test_load_cached_keeps_stale_file_when_catalog_is_too_large(tmp_path, monkeypatch) -> None:
+    from omastore import catalog as catalog_mod
+
+    monkeypatch.setattr(catalog_mod, "cache_dir", lambda: tmp_path)
+    cached = tmp_path / "plugins-catalog.json"
+    cached.write_text('{"plugins":[{"id":"kept"}]}', encoding="utf-8")
+    os_utime = __import__("os").utime
+    os_utime(cached, (1, 1))
+
+    def boom(url: str, timeout: float = 30):
+        raise ValueError("response too large")
+
+    monkeypatch.setattr(catalog_mod, "fetch_json", boom)
+    assert catalog_mod.load_cached("plugins-catalog.json", "https://example.invalid/c.json", force=False) == {
+        "plugins": [{"id": "kept"}]
+    }
+
+
 def test_find_by_kind_and_name() -> None:
     catalogs = Catalogs(
         themes=[Item(kind="theme", id="lumon", name="Lumon")],
