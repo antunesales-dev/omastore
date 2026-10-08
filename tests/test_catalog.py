@@ -45,9 +45,50 @@ def test_load_cached_keeps_stale_file_when_catalog_is_too_large(tmp_path, monkey
         raise ValueError("response too large")
 
     monkeypatch.setattr(catalog_mod, "fetch_json", boom)
-    assert catalog_mod.load_cached("plugins-catalog.json", "https://example.invalid/c.json", force=False) == {
-        "plugins": [{"id": "kept"}]
+    payload, warning = catalog_mod.load_cached(
+        "plugins-catalog.json", "https://example.invalid/c.json", force=False
+    )
+    assert payload == {"plugins": [{"id": "kept"}]}
+    assert "could not refresh" in warning
+    assert "response too large" in warning
+
+
+def test_slim_catalog_drops_unused_plugin_fields() -> None:
+    from omastore.catalog import slim_catalog
+
+    raw = {
+        "generatedAt": "2026-10-08",
+        "plugins": [
+            {
+                "id": "overview",
+                "name": "Overview",
+                "repo": "https://github.com/example/overview",
+                "upstreamValidatedCommit": "abc",
+                "upstreamSourceFingerprint": "deadbeef",
+            }
+        ],
     }
+    slim = slim_catalog("plugins-catalog.json", raw)
+    assert set(slim) == {"plugins"}
+    assert slim["plugins"][0]["id"] == "overview"
+    assert "upstreamValidatedCommit" not in slim["plugins"][0]
+
+
+def test_load_cached_rewrites_fat_cache(tmp_path, monkeypatch) -> None:
+    from omastore import catalog as catalog_mod
+
+    monkeypatch.setattr(catalog_mod, "cache_dir", lambda: tmp_path)
+    cached = tmp_path / "plugins-catalog.json"
+    cached.write_text(
+        '{"generatedAt":"x","plugins":[{"id":"overview","upstreamValidatedCommit":"abc"}]}',
+        encoding="utf-8",
+    )
+    payload, warning = catalog_mod.load_cached(
+        "plugins-catalog.json", "https://example.invalid/c.json", force=False
+    )
+    assert warning == ""
+    assert payload == {"plugins": [{"id": "overview"}]}
+    assert "upstreamValidatedCommit" not in cached.read_text(encoding="utf-8")
 
 
 def test_find_by_kind_and_name() -> None:

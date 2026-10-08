@@ -8,7 +8,7 @@ from textual.events import Click, MouseScrollDown, MouseScrollUp
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Markdown, OptionList, Static
 from textual.widgets.option_list import Option
-from textual_image.widget import Image as ShotImage
+
 from rich.cells import set_cell_size
 from rich.text import Text
 
@@ -64,6 +64,28 @@ from omastore.scan import (
     scan_item,
 )
 from omastore.theme import omarchy_theme_css
+
+
+class ShotFallback(Static):
+    """Stand-in when textual-image cannot read the terminal cell size."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__("", **kwargs)
+        self._image = None
+
+    @property
+    def image(self):
+        return self._image
+
+    @image.setter
+    def image(self, value) -> None:
+        self._image = value
+
+
+try:
+    from textual_image.widget import Image as ShotImage
+except Exception:
+    ShotImage = ShotFallback
 
 PALETTE_KEYS = [
     "background",
