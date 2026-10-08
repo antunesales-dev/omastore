@@ -22,6 +22,9 @@ PLUGIN_CATALOG_URL = (
     "main/site/catalog.json"
 )
 DEFAULT_TTL = 6 * 60 * 60
+# HANCORE site/catalog.json passed the 12 MiB repo-download cap (13.2 MiB on 2026-10-08).
+# Catalog JSON only. Repo archives stay on safety.MAX_FETCH_BYTES.
+CATALOG_MAX_BYTES = 32 * 1024 * 1024
 _CACHE_FILES = ("themes-data.json", "plugins-catalog.json")
 
 
@@ -67,7 +70,7 @@ def _write_json(path: Path, payload: Any) -> None:
 def fetch_json(url: str, timeout: float = 30) -> Any:
     from omastore.safety import fetch_bytes
 
-    return json.loads(fetch_bytes(url, timeout=timeout).decode("utf-8"))
+    return json.loads(fetch_bytes(url, timeout=timeout, limit=CATALOG_MAX_BYTES).decode("utf-8"))
 
 
 def fetch_text(url: str, timeout: float = 20) -> str:
@@ -89,7 +92,7 @@ def load_cached(name: str, url: str, *, force: bool = False, ttl: int = DEFAULT_
         payload = fetch_json(url)
         _write_json(path, payload)
         return payload
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as exc:
         if path.exists():
             try:
                 return _read_json(path)
