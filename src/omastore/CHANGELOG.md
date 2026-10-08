@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.9 — 2026-10-08
+
+Catalog refresh no longer closes the TUI when the plugin list outgrows the old cap.
+
+**Slim cache.** Theme and plugin caches keep only the fields the TUI reads. Verification commits and fingerprints stay on HANCORE's site.
+
+**Failed refresh.** A download that is too large, or otherwise fails, keeps the cached catalog and says so on the status line.
+
+**Screenshots.** If the terminal reports a zero cell size, omastore still opens. Previews wait until the terminal can draw them.
+
 ## 0.2.8 — 2026-09-11
 
 Sandboxed scans, warn does not refuse install, and hide inactive community plugins.

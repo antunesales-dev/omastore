@@ -26,6 +26,48 @@ DEFAULT_TTL = 6 * 60 * 60
 # Catalog JSON only. Repo archives stay on safety.MAX_FETCH_BYTES.
 CATALOG_MAX_BYTES = 32 * 1024 * 1024
 _CACHE_FILES = ("themes-data.json", "plugins-catalog.json")
+# Fields parse_theme / parse_plugin read. The HANCORE file also carries
+# verification commits and fingerprints the TUI never shows.
+_THEME_FIELDS = frozenset({
+    "slug",
+    "id",
+    "name",
+    "github_owner",
+    "description",
+    "github_url",
+    "stars",
+    "colors_json",
+    "primary_hue",
+    "readme_text",
+    "preview_url",
+    "security_warnings",
+    "is_builtin",
+    "is_curated",
+    "updated_at",
+    "last_scraped_at",
+})
+_PLUGIN_FIELDS = frozenset({
+    "id",
+    "name",
+    "author",
+    "description",
+    "repo",
+    "stars",
+    "version",
+    "category",
+    "tags",
+    "previewImage",
+    "previewThumbnail",
+    "installNote",
+    "installAvailable",
+    "verificationStatus",
+    "license",
+    "sourceType",
+    "listedAt",
+    "addedAt",
+    "repositoryUpdatedAt",
+    "repoUpdatedAt",
+})
 
 
 def catalog_cache_age_label(*, now: float | None = None) -> str:
@@ -79,25 +121,74 @@ def fetch_text(url: str, timeout: float = 20) -> str:
     return _fetch_text(url, timeout=timeout)
 
 
-def load_cached(name: str, url: str, *, force: bool = False, ttl: int = DEFAULT_TTL) -> Any:
+def _slim_row(row: Any, fields: frozenset[str]) -> Any:
+    if not isinstance(row, dict):
+        return row
+    return {key: row[key] for key in fields if key in row}
+
+
+def slim_catalog(name: str, payload: Any) -> Any:
+    """Drop catalog keys the TUI does not read."""
+    if name.startswith("themes"):
+        if isinstance(payload, list):
+            return [_slim_row(row, _THEME_FIELDS) for row in payload]
+        return payload
+    if isinstance(payload, dict) and isinstance(payload.get("plugins"), list):
+        return {"plugins": [_slim_row(row, _PLUGIN_FIELDS) for row in payload["plugins"]]}
+    if isinstance(payload, list):
+        return [_slim_row(row, _PLUGIN_FIELDS) for row in payload]
+    return payload
+
+
+def _catalog_rows(name: str, payload: Any) -> list:
+    if name.startswith("themes"):
+        return payload if isinstance(payload, list) else []
+    if isinstance(payload, dict):
+        rows = payload.get("plugins")
+        return rows if isinstance(rows, list) else []
+    return payload if isinstance(payload, list) else []
+
+
+def _needs_slim(name: str, payload: Any) -> bool:
+    fields = _THEME_FIELDS if name.startswith("themes") else _PLUGIN_FIELDS
+    if not name.startswith("themes") and isinstance(payload, dict) and set(payload) - {"plugins"}:
+        return True
+    for row in _catalog_rows(name, payload):
+        if isinstance(row, dict) and set(row) - fields:
+            return True
+    return False
+
+
+def _store_slim(name: str, path: Path, payload: Any) -> Any:
+    if not _needs_slim(name, payload):
+        return payload
+    slim = slim_catalog(name, payload)
+    _write_json(path, slim)
+    return slim
+
+
+def load_cached(name: str, url: str, *, force: bool = False, ttl: int = DEFAULT_TTL) -> tuple[Any, str]:
+    """Return catalog JSON and a warning when the refresh failed and the cache was kept."""
     path = cache_dir() / name
     if path.exists() and not force:
         age = time.time() - path.stat().st_mtime
         if age < ttl:
             try:
-                return _read_json(path)
+                return _store_slim(name, path, _read_json(path)), ""
             except json.JSONDecodeError:
                 pass
     try:
-        payload = fetch_json(url)
+        payload = slim_catalog(name, fetch_json(url))
         _write_json(path, payload)
-        return payload
+        return payload, ""
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as exc:
         if path.exists():
             try:
-                return _read_json(path)
+                cached = _store_slim(name, path, _read_json(path))
             except json.JSONDecodeError:
-                pass
+                cached = None
+            if cached is not None:
+                return cached, f"could not refresh {name}: {exc}"
         raise CatalogError(f"could not load {name}: {exc}") from exc
 
 
@@ -146,19 +237,21 @@ def load_catalogs(*, force: bool = False) -> Catalogs:
     theme_error = ""
     plugin_error = ""
     try:
-        raw_themes = load_cached("themes-data.json", THEME_CATALOG_URL, force=force)
+        raw_themes, theme_note = load_cached("themes-data.json", THEME_CATALOG_URL, force=force)
         if isinstance(raw_themes, list):
             themes = [parse_theme(row) for row in raw_themes if isinstance(row, dict)]
+            theme_error = theme_note
         else:
             theme_error = "unexpected theme catalog shape"
     except CatalogError as exc:
         theme_error = str(exc)
 
     try:
-        raw_plugins = load_cached("plugins-catalog.json", PLUGIN_CATALOG_URL, force=force)
+        raw_plugins, plugin_note = load_cached("plugins-catalog.json", PLUGIN_CATALOG_URL, force=force)
         rows = raw_plugins.get("plugins") if isinstance(raw_plugins, dict) else raw_plugins
         if isinstance(rows, list):
             plugins = [parse_plugin(row) for row in rows if isinstance(row, dict) and row.get("id")]
+            plugin_error = plugin_note
         else:
             plugin_error = "unexpected plugin catalog shape"
     except CatalogError as exc:
